@@ -8,6 +8,7 @@ export const templateFiles = {
   extensionSource: "extension.ts",
   calcSource: "calc.ts",
   extractSource: "extract.ts",
+  webSource: "web.ts",
 } as const;
 export function renderTemplates(): string {
   const root = new URL("../templates/", import.meta.url);

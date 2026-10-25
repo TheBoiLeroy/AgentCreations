@@ -21,10 +21,44 @@ interface Spec {
   inputs: Input[];
   conversation: 'oneShot' | 'followUp';
   output: { kind: string; destination: string };
+  skillAnswers?: Record<string, string>;
 }
 interface WorkerConfig {
   tools: string[];
   extensions: string[];
+  // Actions the worker may only propose. This command carries them out after the user approves.
+  actions?: string[];
+}
+export interface EmailProposal {
+  to: string;
+  subject: string;
+  body: string;
+}
+
+/** The last ```send-email block in the worker's result, as JSON {to, subject, body}. */
+export function emailProposal(text: string): EmailProposal | { error: string } | undefined {
+  const blocks = [...text.matchAll(/```send-email[^\n]*\n([\s\S]*?)```/g)];
+  if (!blocks.length) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(blocks[blocks.length - 1][1]);
+  } catch {
+    return { error: 'the proposed email is not valid JSON.' };
+  }
+  const email = value as Partial<EmailProposal>;
+  if (typeof email.to !== 'string' || typeof email.subject !== 'string' || typeof email.body !== 'string')
+    return { error: 'the proposed email needs to, subject and body.' };
+  if (!email.subject.trim() || !email.body.trim()) return { error: 'the proposed email is empty.' };
+  if (email.subject.length > 300 || email.body.length > 20000) return { error: 'the proposed email is too long.' };
+  return { to: email.to.trim(), subject: email.subject.trim().replace(/[\r\n]+/g, ' '), body: email.body.trim() };
+}
+
+/** Configured recipients only: page content can't redirect an email to someone else. */
+export function allowedRecipients(spec: Pick<Spec, 'skillAnswers'>, env: Record<string, string | undefined>): string[] {
+  return [spec.skillAnswers?.recipient, env.EMAIL_TO]
+    .flatMap((value) => (value || '').split(','))
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 export function tokenize(text: string): string[] {
@@ -191,6 +225,33 @@ export default function (pi: ExtensionAPI) {
           }
         }
         pi.sendMessage({ customType: 'agent-result', content, display: true }, { triggerTurn: false });
+        if (!error && output && config.actions?.includes('send-email'))
+          offerEmail(output).catch((sendError) => ctx.ui.notify('Email not sent: ' + (sendError as Error).message, 'error'));
+      };
+      // The worker can't send. It proposes; the user approves here; this command sends.
+      const offerEmail = async (text: string) => {
+        const proposal = emailProposal(text);
+        if (!proposal) return;
+        if ('error' in proposal) return ctx.ui.notify('Email not sent: ' + proposal.error, 'warning');
+        const allowed = allowedRecipients(spec, process.env);
+        if (!allowed.includes(proposal.to.toLowerCase()))
+          return ctx.ui.notify(
+            'Email not sent: ' + proposal.to + ' is not the configured recipient' + (allowed.length ? ' (' + allowed.join(', ') + ').' : '. Set EMAIL_TO.'),
+            'warning',
+          );
+        const key = process.env.RESEND_API_KEY;
+        const from = process.env.EMAIL_FROM;
+        if (!key || !from) return ctx.ui.notify('Email not sent: set RESEND_API_KEY and EMAIL_FROM before starting Pi.', 'warning');
+        if (!ctx.hasUI) return ctx.ui.notify('Email not sent: approval needs an interactive Pi session.', 'warning');
+        const approved = await ctx.ui.confirm('Send this email?', 'To: ' + proposal.to + '\nSubject: ' + proposal.subject + '\n\n' + proposal.body.slice(0, 4000));
+        if (!approved || generation !== runGeneration) return ctx.ui.notify('Email not sent.', 'info');
+        const response = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: [proposal.to], subject: proposal.subject, text: proposal.body }),
+          signal: AbortSignal.timeout(15000),
+        });
+        ctx.ui.notify(response.ok ? 'Sent “' + proposal.subject + '” to ' + proposal.to + '.' : 'Email failed: HTTP ' + response.status, response.ok ? 'info' : 'error');
       };
       worker.stdout?.on('data', (chunk: Buffer) => {
         if (output.length + chunk.length > 1000000) {

@@ -11,7 +11,8 @@ import { renderTemplates } from "../scripts/embed";
 import { evaluate } from "../templates/calc";
 import { extractText, pdf, unzip } from "../templates/extract";
 import { parseProcesses } from "../templates/extension";
-import { tokenize } from "../templates/worker";
+import { allowedRecipients, emailProposal, tokenize } from "../templates/worker";
+import { pageText, publicUrl } from "../templates/web";
 
 const baseSpec = {
   slug: "estimates",
@@ -42,7 +43,7 @@ function load(
     cwd: "/workspace",
     hasUI: true,
     model: { provider: "anthropic", id: "test-model" },
-    ui: { notify: vi.fn(), setStatus: vi.fn(), setWidget: vi.fn() },
+    ui: { notify: vi.fn(), setStatus: vi.fn(), setWidget: vi.fn(), confirm: vi.fn(async () => true) },
   };
   let handler: (args: string, context: typeof ctx) => Promise<void> = async () => {};
   const pi = {
@@ -86,6 +87,8 @@ function load(
     process,
     setTimeout,
     clearTimeout,
+    AbortSignal,
+    fetch: (...call: Parameters<typeof fetch>) => globalThis.fetch(...call),
     setInterval,
     clearInterval,
     require: (name: string) => {
@@ -100,11 +103,15 @@ function load(
   exports.default!(pi);
   return { worker, spawn, events, ctx, pi, fs: fsMock, invoke: (args: string) => handler(args, ctx) };
 }
-const setup = (spec: Record<string, unknown> = {}, config = { tools: [] as string[], extensions: [] as string[] }) =>
+const setup = (spec: Record<string, unknown> = {}, config: { tools: string[]; extensions: string[]; actions?: string[] } = { tools: [], extensions: [] }) =>
   load(runnerSource, { "agent.json": { ...baseSpec, ...spec }, "worker.json": config });
 const args = (s: ReturnType<typeof setup>) => (s.spawn.mock.calls[0] as unknown as [string, string[]])[1];
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 describe("generated Pi worker", () => {
   it("takes flags from worker.json, not hard-coded checks", async () => {
     const none = setup();
@@ -200,6 +207,49 @@ describe("generated Pi worker", () => {
     await s.invoke("./past one");
     s.worker.emit("error", new Error("ENOENT"));
     expect(s.pi.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ content: "Could not start pi: ENOENT" }), expect.anything());
+  });
+  it("parses a proposed email and only allows configured recipients", () => {
+    const block = (json: string) => "Findings\n\n```send-email\n" + json + "\n```\n";
+    expect(emailProposal("No email here")).toBeUndefined();
+    expect(emailProposal(block('{"to":"me@example.com","subject":"Digest\\nx","body":"- AI"}'))).toEqual({ to: "me@example.com", subject: "Digest x", body: "- AI" });
+    expect(emailProposal(block("{not json"))).toEqual({ error: "the proposed email is not valid JSON." });
+    expect(emailProposal(block('{"to":"me@example.com"}'))).toEqual({ error: "the proposed email needs to, subject and body." });
+    expect(allowedRecipients({ skillAnswers: { recipient: "Me@Example.com" } }, { EMAIL_TO: "a@x.com, b@x.com" })).toEqual(["me@example.com", "a@x.com", "b@x.com"]);
+  });
+  const emailRun = async (to: string, approve = true) => {
+    vi.stubEnv("RESEND_API_KEY", "test-key");
+    vi.stubEnv("EMAIL_FROM", "Bot <bot@example.com>");
+    vi.stubEnv("EMAIL_TO", "");
+    const send = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", send);
+    const s = setup(
+      { skillAnswers: { recipient: "me@example.com" }, inputs: [{ name: "topics", label: "Topics", type: "text", formats: [], required: false }] },
+      { tools: [], extensions: [], actions: ["send-email"] },
+    );
+    s.ctx.ui.confirm.mockResolvedValue(approve);
+    await s.invoke("");
+    s.worker.stdout.emit("data", Buffer.from('Findings\n```send-email\n{"to":"' + to + '","subject":"Digest","body":"- AI news"}\n```'));
+    s.worker.emit("close", 0);
+    await vi.waitFor(() => expect(s.ctx.ui.notify.mock.calls.length).toBeGreaterThan(1));
+    return { s, send };
+  };
+  it("sends a proposed email only after the user approves it", async () => {
+    const { s, send } = await emailRun("me@example.com");
+    expect(s.ctx.ui.confirm).toHaveBeenCalledWith("Send this email?", expect.stringContaining("To: me@example.com"));
+    expect(send).toHaveBeenCalledWith("https://api.resend.com/emails", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse((send.mock.calls[0] as unknown as [string, { body: string }])[1].body)).toEqual({
+      from: "Bot <bot@example.com>", to: ["me@example.com"], subject: "Digest", text: "- AI news",
+    });
+    expect(s.ctx.ui.notify).toHaveBeenLastCalledWith("Sent “Digest” to me@example.com.", "info");
+  });
+  it("doesn't send when the user declines or the recipient isn't configured", async () => {
+    const declined = await emailRun("me@example.com", false);
+    expect(declined.send).not.toHaveBeenCalled();
+    expect(declined.s.ctx.ui.notify).toHaveBeenLastCalledWith("Email not sent.", "info");
+    const redirected = await emailRun("attacker@example.com");
+    expect(redirected.s.ctx.ui.confirm).not.toHaveBeenCalled();
+    expect(redirected.send).not.toHaveBeenCalled();
+    expect(redirected.s.ctx.ui.notify).toHaveBeenLastCalledWith(expect.stringContaining("is not the configured recipient"), "warning");
   });
   it("tokenizes quoted arguments", () =>
     expect(tokenize(`./a "b c" 'd' ""`)).toEqual(["./a", "b c", "d", ""]));
@@ -315,6 +365,16 @@ describe("bundled extract tool", () => {
   });
 });
 
+describe("bundled web tool", () => {
+  it("fetches only public http(s) URLs", () => {
+    expect(publicUrl("https://example.com/news").hostname).toBe("example.com");
+    for (const url of ["file:///etc/passwd", "http://localhost:3000", "http://127.0.0.1", "http://192.168.1.4", "http://10.0.0.1", "http://[::1]/", "https://user:pw@example.com"])
+      expect(() => publicUrl(url)).toThrow();
+  });
+  it("turns HTML into readable text", () => {
+    expect(pageText("<html><head><title>x</title></head><script>bad()</script><p>AI &amp; chips</p><p>Second</p></html>")).toBe("AI & chips\nSecond");
+  });
+});
 describe("embedded templates", () => {
   it("are regenerated from templates/ (run corepack pnpm templates)", () => {
     expect(readFileSync(new URL("./templates.ts", import.meta.url), "utf8")).toBe(renderTemplates());

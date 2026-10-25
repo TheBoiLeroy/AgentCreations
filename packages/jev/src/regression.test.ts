@@ -135,6 +135,7 @@ describe("Estimates regression", () => {
     expect(JSON.parse(files["worker.json"])).toEqual({
       tools: ["read", "grep", "find", "ls", "calc", "extract_document"],
       extensions: ["tools/calc.ts", "tools/extract.ts"],
+      actions: [],
     });
     expect(files["instructions.md"]).not.toContain("draft-text");
     expect(files["README.md"]).toContain('/estimates ./past-estimates "New job"');
