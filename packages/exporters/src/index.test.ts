@@ -17,6 +17,7 @@ import {
   hostedUrl,
   installation,
   piPackage,
+  requiredEnv,
   skillFiles,
   toolRegistry,
   tools,
@@ -101,6 +102,7 @@ describe("exports", () => {
     expect(JSON.parse(files["worker.json"])).toEqual({
       tools: ["read", "grep", "find", "ls", "calc"],
       extensions: ["tools/calc.ts"],
+      actions: [],
     });
     expect(files).toHaveProperty("tools/calc.ts");
     expect(files).not.toHaveProperty("tools/extract.ts");
@@ -196,20 +198,53 @@ describe("tool registry and export checks", () => {
     const s = spec({
       tools: [
         ...exampleAgent.tools,
-        { id: "web-search", requiresApproval: false },
+        { id: "read-email", requiresApproval: false },
         { id: "skill-pdf", requiresApproval: true, skillSource: { repository: "anthropics/skills", skill: "pdf" } },
       ],
     });
     expect(pi(s)).toEqual(
       expect.arrayContaining([
-        "`web-search` isn't a tool this exporter can supply. Remove it from the toolkit.",
+        "`read-email` isn't a tool this exporter can supply. It needs a mailbox connection, which Pi packages can't supply. Remove it, or add the emails as a file input.",
         expect.stringContaining("`skill-pdf` isn't a tool this exporter can supply. External skills can't be bundled"),
       ]),
     );
     expect(() => piPackage(s)).toThrow(ExportError);
   });
+  it("bundles web search and hands approved email to the command", () => {
+    const s = spec({
+      name: "Research digest",
+      category: "information-analysis",
+      skillAnswers: { topics: "AI", recipient: "me@example.com" },
+      tools: [
+        { id: "web-search", requiresApproval: false },
+        { id: "send-email", requiresApproval: true },
+      ],
+      inputs: [{ name: "researchTopics", label: "Research topics", type: "text", formats: [], required: false }],
+    });
+    expect(pi(s)).toEqual([]);
+    const files = piPackage(s);
+    expect(JSON.parse(files["worker.json"])).toEqual({
+      tools: ["web_search", "fetch_page"],
+      extensions: ["tools/web.ts"],
+      actions: ["send-email"],
+    });
+    expect(files["tools/web.ts"]).toContain("registerTool");
+    expect(files["instructions.md"]).toContain("## Proposed actions");
+    expect(files["instructions.md"]).toContain("fenced block tagged send-email");
+    expect(files["instructions.md"]).toContain("- recipient: me@example.com");
+    expect(files["README.md"]).toContain("`BRAVE_API_KEY`");
+    expect(files["README.md"]).toContain("`RESEND_API_KEY`");
+    expect(files["README.md"]).not.toContain("Web access is not supplied");
+    expect(checkWorkerFiles(s, files)).toEqual([]);
+    expect(requiredEnv(["web-search", "send-email"])).toEqual(["BRAVE_API_KEY", "RESEND_API_KEY", "EMAIL_FROM"]);
+  });
+  it("keeps email actions off extension agents", () => {
+    expect(pi(spec({ ...tracker, tools: [{ id: "send-email", requiresApproval: true }] }))).toContain(
+      "`send-email` needs a model run, which extension agents don't have. Remove it or choose the worker runtime.",
+    );
+  });
   it("gives behavior tools no flags and lists only granted tools", () => {
-    expect(workerConfig(behaviorTools)).toEqual({ tools: [], extensions: [] });
+    expect(workerConfig(behaviorTools)).toEqual({ tools: [], extensions: [], actions: [] });
     const files = piPackage(spec({ category: "creation-communication", method: [], tools: [{ id: "draft-text", requiresApproval: false }], inputs: [{ name: "notes", label: "Meeting notes", type: "text", formats: [], required: true }] }));
     expect(JSON.parse(files["worker.json"]).tools).toEqual([]);
     expect(files["instructions.md"]).toContain("You have no tools.");

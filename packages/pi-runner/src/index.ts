@@ -6,4 +6,5 @@ export {
   extensionSource,
   calcSource,
   extractSource,
+  webSource,
 } from "./templates";

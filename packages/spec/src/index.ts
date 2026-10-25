@@ -472,7 +472,10 @@ function section(title: string, lines: string[]) {
 export function inputLine(x: AgentInput) {
   return `- ${x.name} (${x.type}${x.formats.length ? `: ${x.formats.join(", ")}` : ""}${x.required ? "" : ", optional"}): ${x.label}`;
 }
-export function gapRule(s: Pick<AgentSpec, "conversation">) {
+export function gapRule(s: Pick<AgentSpec, "conversation">, host = false) {
+  // A host agent runs the skill in the user's conversation, so it can pause for approval.
+  if (host)
+    return "If an input is missing or unclear, make a reasonable assumption, state it, and list your assumptions in the result. Ask only when you can't continue without the answer.";
   return s.conversation === "oneShot"
     ? "You cannot ask questions; nobody will answer before you finish. If an input is missing or unclear, continue with clearly stated assumptions and list the missing inputs and your assumptions in the result."
     : "If a required input is missing, ask one short question and stop. The user replies with another run.";
@@ -484,7 +487,7 @@ export function agentPrompt(input: AgentSpec): string {
     (t) =>
       `- ${t.id}: ${t.requiresApproval ? "Asks before sending or changing" : "Read or draft only"}${t.skillSource ? `\n  External skill: https://skills.sh/${t.skillSource.repository}/${t.skillSource.skill}\n  Manual setup after reviewing the source: npx skills add ${t.skillSource.repository} --skill ${t.skillSource.skill}\n  Not bundled or installed. Requires a compatible runtime and its dependencies; does not grant permissions. Restricted workers may not support this skill.` : ""}`,
   );
-  return `# ${s.name}\n\n${s.description}\n\n## Task\n${s.instructions}\n\n## Input\n${s.startsWith}\n${section("Inputs", s.inputs.map(inputLine))}${section("Method", s.method.map((x, i) => `${i + 1}. ${x}`))}\n## Deliverable\n${s.givesBack}\n${section("Required sections", s.output.template.map((x) => `- ${x}`))}\n## Requirements\n- Files: ${s.needs.files.join("; ") || "None"}\n- Web access: ${s.needs.web ? "Required; work from supplied content if unavailable" : "Not required"}\n- App connections: ${s.needs.connections.join("; ") || "None"}\n\n## Selected tools\n${tools.join("\n") || "No tools selected."}\n\nRequirements describe needed inputs, not granted permissions. Never invent access. Never request credentials in chat or include secrets in output.\n\n## Missing inputs\n${gapRule(s)}\n\n## Approval boundaries\n${s.boundaries.map((x) => `- ${x}`).join("\n")}\nIf an action needs approval, stop and ask. A background worker must report the proposed action instead of taking it.\n\n## Output\nFormat: ${s.output.format}\nDestination: ${s.output.destination}\n`;
+  return `# ${s.name}\n\n${s.description}\n\n## Task\n${s.instructions}\n\n## Input\n${s.startsWith}\n${section("Inputs", s.inputs.map(inputLine))}${section("Method", s.method.map((x, i) => `${i + 1}. ${x}`))}\n## Deliverable\n${s.givesBack}\n${section("Required sections", s.output.template.map((x) => `- ${x}`))}\n## Requirements\n- Files: ${s.needs.files.join("; ") || "None"}\n- Web access: ${s.needs.web ? "Required; work from supplied content if unavailable" : "Not required"}\n- App connections: ${s.needs.connections.join("; ") || "None"}\n\n## Selected tools\n${tools.join("\n") || "No tools selected."}\n\nRequirements describe needed inputs, not granted permissions. Never invent access. Never request credentials in chat or include secrets in output.\n\n## Missing inputs\n${gapRule(s, true)}\n\n## Approval boundaries\n${s.boundaries.map((x) => `- ${x}`).join("\n")}\nBefore any action that needs approval, show exactly what you'll do and wait for the user's yes.\n\n## Output\nFormat: ${s.output.format}\nDestination: ${s.output.destination}\n`;
 }
 
 export const steps = [

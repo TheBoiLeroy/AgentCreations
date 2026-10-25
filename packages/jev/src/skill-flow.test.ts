@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptyDraft, mergeSkillInputs, skillRecordSchema, specProblems, type BuildDraft } from "@agents/spec";
-import { catalog, classifyRuntime, createAgentSpec, detailsFromSpec, pendingQuestions, recommendRules, skillQuestions } from "./index";
+import { exportProblems, piPackage } from "@agents/exporters";
+import { catalog, classifyRuntime, createAgentSpec, detailsFromSpec, isVagueWhenToUse, pendingQuestions, recommendRules, skillQuestions, suggestDetails } from "./index";
 const draft: BuildDraft = {
   ...emptyDraft, category: "information-analysis", name: "Research Mailer",
   context: "research a topic and email me", selectedTools: ["web-search", "send-email"],
@@ -41,5 +42,29 @@ describe("skill-driven research mailer", () => {
     expect(specProblems(spec)).toEqual([]);
     expect(detailsFromSpec(spec).skillAnswers).toEqual(draft.details.skillAnswers);
     expect(spec.tools.find((t) => t.id === "send-email")?.requiresApproval).toBe(true);
+  });
+  it("writes a research method, a real trigger and optional configured inputs", () => {
+    const spec = createAgentSpec(draft, "research-mailer");
+    expect(spec.method[0]).toContain("Search the web");
+    expect(spec.method.join(" ")).not.toContain("Calculate totals");
+    expect(spec.skill.whenToUse).toBe("Use when the user asks to research a topic and email me, or runs Research Mailer.");
+    expect(spec.output.template).toEqual(["Findings", "Sources", "Proposed email", "Assumptions"]);
+    expect(spec.inputs.every((input) => !input.required)).toBe(true);
+    expect(spec.instructions).toContain("- Email recipient: owner@example.com");
+    expect(spec.instructions).not.toContain("{");
+  });
+  it("exports the research mailer to Pi with search and approved email", () => {
+    const spec = createAgentSpec(draft, "research-mailer");
+    expect(exportProblems(spec, "Pi")).toEqual([]);
+    const files = piPackage(spec);
+    expect(JSON.parse(files["worker.json"]).actions).toEqual(["send-email"]);
+    expect(files).toHaveProperty("tools/web.ts");
+  });
+  it("rejects a vague 'when to use' answer", () => {
+    for (const value of ["never", "N/A", "always", "idk"]) expect(isVagueWhenToUse(value)).toBe(true);
+    expect(isVagueWhenToUse("Use when I ask for a news digest")).toBe(false);
+    const plain = { ...emptyDraft, category: "creation-communication" as const, name: "Notes", context: "summarize meeting notes", selectedTools: ["draft-text"] };
+    const details = { ...suggestDetails(plain), inputs: [{ label: "Meeting notes", type: "text" as const, formats: [], required: true }], template: "Summary", whenToUse: "never" };
+    expect(pendingQuestions({ ...plain, details }).map((q) => q.field)).toContain("whenToUse");
   });
 });
