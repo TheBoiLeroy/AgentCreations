@@ -1,0 +1,13 @@
+{
+  "name": "@agents/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@agents/spec": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "@anthropic-ai/sdk": "^0.67.0",
+    "express": "^5.1.0",
+    "zod": "^3.25.76"
+  }
+}

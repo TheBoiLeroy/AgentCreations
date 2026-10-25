@@ -1,0 +1,24 @@
+{
+  "name": "agent-creations",
+  "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "scripts": {
+    "dev": "corepack pnpm --filter @agents/web dev",
+    "build": "corepack pnpm --filter @agents/web build",
+    "typecheck": "tsc --noEmit && corepack pnpm --filter @agents/web typecheck",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "mcp": "tsx apps/mcp-server/src/index.ts",
+    "templates": "tsx packages/pi-runner/scripts/embed.ts"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
+    "@playwright/test": "^1.56.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

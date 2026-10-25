@@ -1,0 +1,263 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`templateToJsonSchema > maps every section content kind, bounds lists and closes all object levels 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "sections": {
+      "additionalProperties": false,
+      "properties": {
+        "checklist": {
+          "items": {
+            "type": "string",
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "type": "array",
+        },
+        "details": {
+          "items": {
+            "type": "string",
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "type": "array",
+        },
+        "steps": {
+          "items": {
+            "type": "string",
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "type": "array",
+        },
+        "summary": {
+          "type": "string",
+        },
+        "table": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "amount": {
+                "type": "number",
+              },
+            },
+            "required": [
+              "amount",
+            ],
+            "type": "object",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "summary",
+        "table",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [
+    "sections",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`templateToJsonSchema > snapshots 'action-plan' 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "sections": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "assumptions": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "measurement": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+      },
+      "required": [
+        "actions",
+        "measurement",
+        "assumptions",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [
+    "sections",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`templateToJsonSchema > snapshots 'chat-message' 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "sections": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "items": {
+            "type": "string",
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "type": "array",
+        },
+        "summary": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "summary",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [
+    "sections",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`templateToJsonSchema > snapshots 'data' 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+}
+`;
+
+exports[`templateToJsonSchema > snapshots 'document' 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "sections": {
+      "additionalProperties": false,
+      "properties": {
+        "details": {
+          "items": {
+            "type": "string",
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "type": "array",
+        },
+        "summary": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "summary",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [
+    "sections",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`templateToJsonSchema > snapshots 'live-panel' 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "rows": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+          },
+          "running": {
+            "type": "boolean",
+          },
+        },
+        "required": [
+          "name",
+          "running",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+  },
+  "required": [
+    "rows",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`templateToJsonSchema > snapshots 'spreadsheet' 1`] = `
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "sheets": {
+      "additionalProperties": false,
+      "properties": {
+        "transactions": {
+          "additionalProperties": false,
+          "properties": {
+            "rows": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                  },
+                  "description": {
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "description",
+                  "amount",
+                ],
+                "type": "object",
+              },
+              "type": "array",
+            },
+          },
+          "required": [
+            "rows",
+          ],
+          "type": "object",
+        },
+      },
+      "required": [
+        "transactions",
+      ],
+      "type": "object",
+    },
+  },
+  "required": [
+    "sheets",
+  ],
+  "type": "object",
+}
+`;

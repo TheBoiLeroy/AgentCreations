@@ -1,0 +1,12 @@
+{
+  "name": "@agents/exporters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@agents/spec": "workspace:*",
+    "@agents/pi-runner": "workspace:*",
+    "fflate": "^0.8.2"
+  }
+}
