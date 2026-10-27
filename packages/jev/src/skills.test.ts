@@ -11,12 +11,19 @@ describe("curated skills.sh recommendations", () => {
     ["Build a landing page", "skill-frontend-design"],
     ["Optimize React and Next.js", "skill-react-performance"],
     ["Run Playwright browser testing", "skill-webapp-testing"],
+    ["Build an MCP server for our CRM", "skill-mcp-builder"],
+    ["Help me write a skill for invoices", "skill-creator"],
+    ["Design a poster for the open house", "skill-canvas-design"],
+    ["Apply a theme to my report", "skill-theme-factory"],
+    ["Write the weekly status report", "skill-internal-comms"],
+    ["Make an animated GIF for Slack", "skill-slack-gif"],
+    ["Create generative art with p5.js", "skill-algorithmic-art"],
   ])("recommends %s", (context, id) => {
     expect(recommendRules({ ...input, context }).recommendations).toContainEqual(expect.objectContaining({ id, source: "keyword" }));
     expect(getSkillSource(id)).toBeDefined();
   });
   it("does not match partial words", () => {
-    const result = recommendRules({ ...input, context: "reactive excellence presentationsmith frontendish pdfkit" });
+    const result = recommendRules({ ...input, context: "reactive excellence presentationsmith frontendish pdfkit posterity themed newsletters2 gifted skillset mcps" });
     expect(result.recommendations.some((r) => getSkillSource(r.id))).toBe(false);
   });
   it("retains explicit skill chips during model merging", async () => {

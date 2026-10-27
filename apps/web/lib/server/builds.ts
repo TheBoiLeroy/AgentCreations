@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import { draftSchema, triggerFromName } from "@agents/spec";
 import { createAgentSpec, validateDraftCatalog } from "@agents/jev";
+import { originAllowed } from "./origin";
 
 export class ApiError extends Error {
   constructor(
@@ -102,9 +103,11 @@ export async function saveBuild(id: string, body: unknown, create = false) {
   return row;
 }
 export function assertSameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
-    throw new ApiError(403, "Cross-origin writes are not allowed.");
+  if (!originAllowed(request))
+    throw new ApiError(
+      403,
+      "Cross-origin writes are not allowed. If you open the site at another address, add it to APP_ORIGIN.",
+    );
 }
 export async function readBody(request: Request) {
   if (Number(request.headers.get("content-length") || 0) > 64000)
