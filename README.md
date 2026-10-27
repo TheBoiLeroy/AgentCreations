@@ -69,7 +69,7 @@ The optional Jev route has a per-process enhancement budget of 20 calls/minute a
 
 ## Jev’s skills.sh catalog
 
-Jev also recommends a curated set of external skills listed on [skills.sh](https://skills.sh/): Anthropic’s PDF, Excel, PowerPoint, frontend-design and webapp-testing skills, plus Vercel’s React best-practices skill. Whole-word/phrase rules and the optional model can suggest them; slide deck, Excel file and interface output chips select relevant skills explicitly. Users can toggle them like other catalog entries.
+Jev also recommends a curated set of external skills listed on [skills.sh](https://skills.sh/): Anthropic’s PDF, Excel and PowerPoint skills (source-available under Anthropic’s license, not open source), its Apache-2.0 frontend-design, webapp-testing, mcp-builder, skill-creator, canvas-design, theme-factory, internal-comms, slack-gif-creator and algorithmic-art skills, plus Vercel’s React best-practices skill. Whole-word/phrase rules and the optional model can suggest them; slide deck, Excel file and interface output chips select relevant skills explicitly. Users can toggle them like other catalog entries.
 
 The skills step searches the curated catalog by name, description and ID, with Research, Communication, Files, Data and Dev filters. Suggested skills stay first and selected by default; catalog results load incrementally without a total display cap. Filtering never changes selections. This is not a live search of the synchronized skills.sh index.
 
@@ -83,7 +83,9 @@ A description such as “research a topic and email me” now preselects web sea
 
 Drafts default missing `details.skillAnswers` to `{}`. New v3 exports optionally carry `skillAnswers`, with the configured values also rendered as data in their instructions; existing imports remain valid. Every curated catalog entry now exposes the skill metadata contract in `packages/spec/src/skills.ts`. This does not migrate the separate synchronized catalog or enable custom/imported skill creation.
 
-Empty skill searches offer an operational **Request it** action. Apply `supabase/migrations/202610250001_skill_requests.sql` after configuring Supabase auth. It records one normalized search term per authenticated browser owner with RLS; maintainers can aggregate `count(*)` grouped by `search_term` using an administrative database connection. The public API cannot read other owners’ requests. Without cloud configuration, requests fail visibly rather than pretending to save.
+Empty skill searches offer an operational **Request it** action. Apply `supabase/migrations/202610250001_skill_requests.sql` after configuring Supabase auth. It records one normalized search term per authenticated browser owner with RLS; maintainers can aggregate `count(*)` grouped by `search_term` using an administrative database connection. The public API cannot read other owners’ requests. Without cloud configuration, local development (`next dev`) counts requests in `apps/web/.local/skill-requests.json` (gitignored; override the folder with `LOCAL_DATA_DIR`) and says so in the UI; production builds still fail visibly rather than pretending to save.
+
+Browser writes must come from the site's own origin. `localhost`, `127.0.0.1` and `::1` on the same port count as the same machine in development, and the IP address the browser connected to (such as a LAN address) is accepted. If you open the site through a domain name, for example behind a reverse proxy, list it in `APP_ORIGIN` (comma-separated, e.g. `https://agents.example.com`).
 
 Custom-skill generation, GitHub/MCP import and real test runs are **not implemented**. The disabled test-send control explains the missing execution service. No mailbox is connected, no email is sent, and no skill is marked tested. See `docs/skill flow exe.md` for implementation status and remaining work.
 

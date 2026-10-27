@@ -14,7 +14,9 @@ export function MissingSkills({ term }: { term: string }) {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Request could not be saved.");
-      setMessage("Request saved for this browser’s account. Thank you.");
+      setMessage(result.where === "local"
+        ? `Saved on this computer (requested ${result.count} time${result.count === 1 ? "" : "s"}). See .local/skill-requests.json.`
+        : "Request saved for this browser’s account. Thank you.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Request could not be saved.");
     } finally { setBusy(false); }
@@ -26,7 +28,7 @@ export function MissingSkills({ term }: { term: string }) {
     <button className="text-button" disabled={busy || !term.trim() || term.trim().length > 200} onClick={requestSkill}>
       {busy ? "Saving request…" : "Request it"}
     </button>
-    <p className="hint">Records this search and your browser’s account when cloud storage is configured. No request is saved locally.</p>
+    <p className="hint">Records this search. With cloud storage it’s saved to your account; in local development it’s counted in a file on this computer.</p>
     <p aria-live="polite">{message}</p>
   </section>;
 }

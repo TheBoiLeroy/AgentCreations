@@ -85,7 +85,7 @@ test("search and browse every curated skill without changing selections", async 
   while (await page.getByRole("button", { name: /Load more skills/ }).isVisible()) {
     await page.getByRole("button", { name: /Load more skills/ }).click();
   }
-  await expect(page.getByRole("switch")).toHaveCount(18);
+  await expect(page.getByRole("switch")).toHaveCount(25);
   await page.getByRole("switch", { name: "Test web apps", exact: true }).check();
 
   await page.getByLabel("Search skills", { exact: true }).fill("  CONNECTED MAILBOX  ");
@@ -97,7 +97,7 @@ test("search and browse every curated skill without changing selections", async 
   await expect(page.getByText("No other skills match.", { exact: false })).toBeVisible();
   await page.getByLabel("Search skills", { exact: true }).fill("");
   await page.getByRole("group", { name: "Skill categories" }).getByRole("button", { name: "Dev", exact: true }).click();
-  await expect(page.getByRole("switch")).toHaveCount(3);
+  await expect(page.getByRole("switch")).toHaveCount(6);
   await expect(page.getByRole("switch", { name: "Test web apps", exact: true })).toBeChecked();
   await page.getByRole("group", { name: "Skill categories" }).getByRole("button", { name: "All", exact: true }).click();
   await expect(send).toBeChecked();
