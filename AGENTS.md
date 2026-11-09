@@ -5,6 +5,7 @@
 - `Agent Integration Plan New.md` is the current scope. `README.md` documents runtime setup and deployment limits.
 - `packages/spec` owns versioned specs, draft validation, trigger generation and target-independent export checks (`specProblems`). New exports use v3; `parseAgentSpec()` migrates v1/v2 at import and hosted-runtime boundaries. Keep `slug` equal to `trigger` for existing adapters.
 - Jev turns the form into a spec: `classifyRuntime` (worker vs extension; ask on conflict), `suggestDetails` (defaults for the details page; never chip labels as input text), `pendingQuestions` (blocks review) and `createAgentSpec`. Never write placeholder text into a spec.
+- Describe-to-create (`packages/jev/src/describe.ts`) turns one typed or dictated sentence into a whole draft through the same functions, then the `proposed` reducer action lands on review, or on details when questions remain. Every default it fills goes in `draft.assumed` and is shown on review; any user edit clears that list. Keyword-only external skills are suggested but left off. Never take an email address or other identity from the model.
 - Add a page by extending `steps`/`BuildDraft`, then the single reducer in `apps/web/lib/build-machine.ts`, its guarded transitions and restore behavior. Give the page its own component in `components/build-pages.tsx` and wire progress/Back in `app/page.tsx`. Test refresh and backward navigation with every new answer field.
 - `use-build.ts` owns local recovery and serialized cloud saves. Preserve revision conflicts: stale writes must fail rather than overwrite. Cloud rows are owner-scoped through Supabase RLS and an invoker RPC. Apply schema changes through `supabase/migrations` and test the actual SQL in PGlite.
 
@@ -18,7 +19,7 @@
 ## Jev and tools
 
 - Add tools in `packages/jev/src/catalog.ts`: stable id, human label, description, whole-word/phrase keywords, connection requirement and authoritative `requiresApproval`. Add chips/defaults where relevant and tests for false-positive partial words.
-- Rules always run. Explicit chip recommendations survive model merging. Optional model output is catalog-id-only, validated and bounded to eight seconds; errors/timeouts fall back to rules. Keep model keys and calls inside `POST /api/jev`.
+- Rules always run. Explicit chip recommendations survive model merging. Optional model output is catalog-id-only, validated and bounded to eight seconds; errors/timeouts fall back to rules. Keep model keys and calls inside `POST /api/jev` (a `{ description }` body asks for a whole draft).
 - Approval flags come from the catalog, never the LLM or recommendation reasons. Selecting a tool describes a requirement; it does not provision an integration or grant runtime permissions.
 
 ## Existing adapters and safety
@@ -29,3 +30,11 @@
 - The Pi worker is read-only, not an OS sandbox. Preserve cancellation, output bounds, timeouts and shutdown cleanup. The extension template must clear timers, widget, status and heartbeat files on `session_shutdown`.
 - Builder fields, drafts and exports are not secret storage. Keep credentials in server environment variables. Report local-only storage, cloud failures, OAuth requirements and unpublished packages honestly.
 - Before declaring changes verified, run `corepack pnpm typecheck`, `corepack pnpm test`, `corepack pnpm test:e2e`, and `corepack pnpm build`. Browser cloud tests mock transport; PGlite tests execute RLS/uniqueness SQL. Report live Supabase/provider verification separately.
+
+## Profiles and setups
+
+- A setup is a published package: skills referenced by `owner/repository` + skill name, and agent specs built here. Its contract, the pasted-reference parser and the install script live in `packages/spec/src/setups.ts` (`@agents/spec/setups`). The site never stores or serves third-party skill code.
+- Repository and skill tokens end up in copyable shell commands. Keep their patterns free of spaces and shell metacharacters, and validate stored items again in the browser before rendering or exporting them.
+- Profiles exist only for GitHub accounts. `claim_profile()` takes the handle from `auth.identities`, never from request input or `user_metadata`. There is no direct write path to `profiles`.
+- Public pages read through the session-less client and ask for `published` rows only. Writes go through `account()` in `apps/web/lib/server/setups.ts`, which rejects anonymous builder sessions. Updates must name the revision they read.
+- Agents in a setup are full specs, including instructions and configured answers. Keep the warning in the editor that publishing makes them public.

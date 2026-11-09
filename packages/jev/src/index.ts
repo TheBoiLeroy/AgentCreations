@@ -22,6 +22,7 @@ import {
   type ToolId,
 } from "./catalog";
 export { catalog, inputChips, outputChips, getTool, getSkillSource } from "./catalog";
+export * from "./describe";
 const catalogId = z
   .string()
   .refine((id) => !!getTool(id), "Unknown catalog tool");

@@ -440,3 +440,66 @@ test("live agents become Pi extensions with data sources and a toggle command", 
     "This agent runs as a Pi extension. Choose Pi to export it.",
   );
 });
+test("describe an agent, review Jev's assumptions, edit one and create it", async ({ page }) => {
+  await page.goto("/");
+  const box = page.getByLabel("Describe it, and Jev builds the first draft");
+  await expect(page.getByRole("button", { name: "Draft my agent" })).toBeDisabled();
+  await box.fill("Read my PDF contracts and summarize the risks");
+  await page.getByRole("button", { name: "Draft my agent" }).click();
+  await expect(page.getByRole("heading", { name: "Meet your newest helper." })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Jev drafted your agent");
+  const assumed = page.getByLabel("Jev’s assumptions");
+  await expect(assumed).toContainText("Category: Information & Analysis.");
+  await expect(assumed).toContainText("Files to work from");
+  await assumed.getByRole("button", { name: "Change details" }).click();
+  await expect(page.getByLabel("Input 1", { exact: true })).toHaveValue("Files to work from");
+  await page.getByLabel("Input 1", { exact: true }).fill("Signed contracts");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByRole("switch", { name: "Read files", exact: true })).toBeChecked();
+  await expect(page.getByRole("switch", { name: "Work with PDFs", exact: true })).not.toBeChecked();
+  await page.getByRole("button", { name: "Add the details" }).click();
+  await page.getByRole("button", { name: "Review my agent" }).click();
+  await expect(page.locator(".review-card code")).toContainText("<signedContracts>");
+  await page.getByRole("button", { name: "Create my agent" }).click();
+  await expect(page.getByRole("heading", { name: "Where do you want to use it?" })).toBeVisible();
+});
+test("a description with open questions lands on the two questions, and Back reaches the description", async ({ page }) => {
+  await page.route("**/api/jev", (route) => route.abort());
+  await page.goto("/");
+  await page.getByLabel("Describe it, and Jev builds the first draft").fill("research a topic and email me");
+  await page.getByRole("button", { name: "Draft my agent" }).click();
+  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("rules filled this in");
+  await expect(page.getByRole("status")).toContainText("2 answers still needed");
+  await page.getByLabel("What topics should it research?").fill("Battery recycling");
+  await page.getByLabel("Which email should it send to?").fill("owner@example.com");
+  await page.getByRole("button", { name: "Review my agent" }).click();
+  await expect(page.getByRole("heading", { name: "Meet your newest helper." })).toBeVisible();
+  for (let i = 0; i < 3; i++) await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByLabel("Anything else Jev should know?")).toHaveValue("research a topic and email me");
+});
+test("dictation adds spoken words to the description when the browser supports it", async ({ page }) => {
+  await page.addInitScript(() => {
+    class FakeRecognition {
+      onresult: ((event: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        setTimeout(() => {
+          const result = Object.assign([{ transcript: "plan my week from my notes" }], { isFinal: true });
+          this.onresult?.({ resultIndex: 0, results: [result] });
+        }, 50);
+      }
+      stop() {
+        this.onend?.();
+      }
+    }
+    // Chromium ships a real implementation under one or both names; replace both.
+    for (const name of ["SpeechRecognition", "webkitSpeechRecognition"])
+      Object.defineProperty(window, name, { value: FakeRecognition, configurable: true });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Dictate your description" }).click();
+  await expect(page.getByLabel("Describe it, and Jev builds the first draft")).toHaveValue("plan my week from my notes");
+  await page.getByRole("button", { name: "Stop dictation" }).click();
+  await expect(page.getByRole("button", { name: "Dictate your description" })).toBeVisible();
+});

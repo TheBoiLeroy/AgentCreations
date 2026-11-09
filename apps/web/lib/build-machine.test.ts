@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildReducer, initialState, snapshot } from "./build-machine";
-import { recommendRules } from "@agents/jev";
+import { proposeRules, recommendRules } from "@agents/jev";
 const ready = buildReducer(initialState, {
   type: "new",
   id: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
@@ -147,5 +147,37 @@ describe("follow-up details", () => {
     });
     expect(restored.draft.step).toBe("details");
     expect(restored.draft.details.seeded).toBe(true);
+  });
+});
+
+describe("describe-to-create", () => {
+  const files = "Read my PDF contracts and summarize the risks";
+  it("lands a complete proposal on review, keeps it through Back and creates the agent", () => {
+    let state = buildReducer(ready, { type: "proposed", proposal: proposeRules(files) });
+    expect(state.draft.step).toBe("review");
+    expect(state.draft.assumed.length).toBeGreaterThan(3);
+    state = buildReducer(state, { type: "navigate", step: "details" });
+    state = buildReducer(state, { type: "navigate", step: "tools" });
+    expect(state.draft.selectedTools).toContain("read-files");
+    state = buildReducer(state, { type: "navigate", step: "review" });
+    expect(state.error).toBe("");
+    state = buildReducer(state, { type: "created", trigger: "contracts" });
+    expect(state.error).toBe("");
+    expect(state.agent?.inputs.map((x) => x.label)).toEqual(["Files to work from", "Details for this run"]);
+    const restored = buildReducer(initialState, { type: "restore", snapshot: snapshot(state) });
+    expect(restored.draft.assumed).toEqual(state.draft.assumed);
+  });
+  it("sends unanswered questions to details and ignores a stale proposal", () => {
+    const state = buildReducer(ready, { type: "proposed", proposal: proposeRules("research a topic and email me") });
+    expect(state.draft.step).toBe("details");
+    expect(state.notice).toContain("2 answers still needed");
+    expect(buildReducer(state, { type: "proposed", proposal: proposeRules(files) })).toBe(state);
+  });
+  it("drops the assumptions once the user edits the draft", () => {
+    const state = buildReducer(ready, { type: "proposed", proposal: proposeRules(files) });
+    expect(buildReducer(state, { type: "context", context: "Something else" }).draft.assumed).toEqual([]);
+    expect(buildReducer(state, { type: "name", name: "Contracts" }).draft.assumed).toEqual([]);
+    expect(buildReducer(state, { type: "details", patch: { template: "Risks" } }).draft.assumed).toEqual([]);
+    expect(buildReducer(state, { type: "toggle-tool", id: "read-files" }).draft.assumed).toEqual([]);
   });
 });

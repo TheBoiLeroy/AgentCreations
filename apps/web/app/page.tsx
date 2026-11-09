@@ -43,8 +43,7 @@ import { InstallPage, download } from "../components/install-page";
 import { fromCloud, useBuild } from "../lib/use-build";
 import type { Snapshot } from "../lib/build-machine";
 
-const LIBRARY_KEY = "agent-creations:library:v2";
-type SavedAgent = { id: string; spec: AgentSpec };
+import { LIBRARY_KEY, type SavedAgent } from "../lib/library";
 const previous: Partial<Record<BuildStep, BuildStep>> = {
   name: "category",
   needs: "name",
@@ -259,6 +258,8 @@ export default function Home() {
             >
               My agents <span>{library.length}</span>
             </button>
+            <a href="/explore">Explore setups</a>
+            <a href="/me">My setups</a>
           </nav>
           <div className="top-actions">
             <button

@@ -15,14 +15,10 @@ export class ApiError extends Error {
 }
 export const cloudConfigured = () =>
   !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
-export async function database(createSession = false) {
-  if (!cloudConfigured())
-    throw new ApiError(
-      503,
-      "Cloud drafts are not configured. Your draft is saved on this device.",
-    );
+/** Cookie-backed Supabase client. Callers check `cloudConfigured()` first. */
+export async function serverClient() {
   const jar = await cookies();
-  const client = createServerClient(
+  return createServerClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_ANON_KEY!,
     {
@@ -40,6 +36,14 @@ export async function database(createSession = false) {
       },
     },
   );
+}
+export async function database(createSession = false) {
+  if (!cloudConfigured())
+    throw new ApiError(
+      503,
+      "Cloud drafts are not configured. Your draft is saved on this device.",
+    );
+  const client = await serverClient();
   const {
     data: { user },
   } = await client.auth.getUser();

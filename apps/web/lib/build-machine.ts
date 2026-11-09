@@ -15,6 +15,7 @@ import {
   suggestDetails,
   validateDraftCatalog,
   type JevResult,
+  type Proposal,
 } from "@agents/jev";
 import { z } from "zod";
 export const snapshotSchema = z
@@ -62,6 +63,7 @@ export type Action =
   | { type: "context"; context: string }
   | { type: "navigate"; step: BuildStep }
   | { type: "recommended"; result: JevResult }
+  | { type: "proposed"; proposal: Proposal }
   | { type: "toggle-tool"; id: string }
   | { type: "details"; patch: Partial<BuildDetails> }
   | { type: "reset-details" }
@@ -87,6 +89,7 @@ const invalidate = (
     selectedTools: [],
     noticed: [],
     followUp: "",
+    assumed: [],
   },
   agent: null,
   error: "",
@@ -136,7 +139,7 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
     case "name":
       return {
         ...state,
-        draft: { ...state.draft, name: action.name },
+        draft: { ...state.draft, name: action.name, assumed: [] },
         agent: null,
         error: "",
       };
@@ -197,6 +200,23 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
                 : "",
             error: "",
           };
+    case "proposed": {
+      // A describe request that finishes after the user moved on is stale.
+      if (!state.ready || state.draft.step !== "category") return state;
+      const open = pendingQuestions(action.proposal.draft).length;
+      return {
+        ...state,
+        draft: action.proposal.draft,
+        agent: null,
+        direction: 1,
+        error: "",
+        notice: `${action.proposal.mode === "fallback" ? "Jev’s model was unavailable, so rules filled this in. " : ""}${
+          open
+            ? `Jev drafted your agent. ${open} answer${open > 1 ? "s" : ""} still needed.`
+            : "Jev drafted your agent. Check the assumptions, then create it."
+        }`,
+      };
+    }
     case "toggle-tool":
       return {
         ...state,
@@ -205,6 +225,7 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
           selectedTools: state.draft.selectedTools.includes(action.id)
             ? state.draft.selectedTools.filter((id) => id !== action.id)
             : [...state.draft.selectedTools, action.id],
+          assumed: [],
         },
         agent: null,
       };
@@ -214,6 +235,8 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
         draft: {
           ...state.draft,
           details: { ...state.draft.details, ...action.patch, seeded: true },
+          // The list describes Jev's untouched draft; an edit makes it stale.
+          assumed: [],
         },
         agent: null,
         error: "",
@@ -227,6 +250,7 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
             ...state.draft,
             details: { ...state.draft.details, runtime: "" },
           }),
+          assumed: [],
         },
         agent: null,
         error: "",

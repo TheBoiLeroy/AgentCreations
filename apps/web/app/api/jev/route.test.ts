@@ -38,6 +38,16 @@ describe("server-only Jev API", () => {
       ).toBe(400);
     }
   });
+  it("drafts a whole agent from a description without model credentials", async () => {
+    const post = (description: string) =>
+      POST(new Request("http://localhost/api/jev", { method: "POST", body: JSON.stringify({ description }) }));
+    const result = await post("Read my PDF contracts and summarize the risks");
+    expect(result.status).toBe(200);
+    const body = await result.json();
+    expect(body.mode).toBe("rules");
+    expect(body.draft).toMatchObject({ step: "review", category: "information-analysis" });
+    expect((await post("short")).status).toBe(400);
+  });
   it("rejects cross-origin writes", async () => {
     expect(
       (

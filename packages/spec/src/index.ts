@@ -561,6 +561,8 @@ export const draftSchema = z
     followUp: z.string().max(500),
     // Older local and cloud drafts predate follow-up details.
     details: detailsSchema.default(emptyDetails),
+    // Defaults Jev chose from a one-sentence description, shown on review.
+    assumed: z.array(text(300)).max(20).default([]),
     step: z.enum(steps),
   })
   .strict();
@@ -576,5 +578,6 @@ export const emptyDraft: BuildDraft = {
   noticed: [],
   followUp: "",
   details: emptyDetails,
+  assumed: [],
   step: "category",
 };

@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import {
   ArrowRight,
   Check,
+  Mic,
   Plus,
   RotateCcw,
   Sparkles,
@@ -31,7 +32,10 @@ import {
   createAgentSpec,
   recommendRules,
   jevResultSchema,
+  proposalSchema,
+  proposeRules,
   type JevInput,
+  type Proposal,
 } from "@agents/jev";
 import type { Action } from "../lib/build-machine";
 import { AgentIcon } from "./agent-icon";
@@ -76,7 +80,143 @@ function Next({
     </button>
   );
 }
-export function CategoryPage({ draft, dispatch }: PageProps) {
+// Minimal shape of the browser speech API; it is not in TypeScript's DOM types.
+interface Dictation {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult:
+    | ((event: {
+        resultIndex: number;
+        results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }>;
+      }) => void)
+    | null;
+  onend: (() => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  start(): void;
+  stop(): void;
+}
+const dictationApi = () => {
+  const scope = window as unknown as Record<string, (new () => Dictation) | undefined>;
+  return scope.SpeechRecognition || scope.webkitSpeechRecognition;
+};
+function DescribeBox({ draft, dispatch }: PageProps) {
+  const [text, setText] = useState(draft.context);
+  const [busy, setBusy] = useState(false);
+  const [canDictate, setCanDictate] = useState(false);
+  const [listening, setListening] = useState(false);
+  const dictation = useRef<Dictation | null>(null);
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => {
+    setCanDictate(!!dictationApi());
+    return () => {
+      dictation.current?.stop();
+      request.current?.abort();
+    };
+  }, []);
+  const ready = text.trim().length >= 8;
+  const build = async () => {
+    if (!ready || busy) return;
+    dictation.current?.stop();
+    setBusy(true);
+    const description = text.trim().slice(0, 4000);
+    const controller = new AbortController();
+    request.current = controller;
+    let proposal: Proposal;
+    try {
+      const response = await fetch("/api/jev", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description }),
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
+      });
+      if (!response.ok) throw new Error("Jev unavailable");
+      proposal = proposalSchema.parse(await response.json());
+    } catch {
+      if (controller.signal.aborted) return;
+      proposal = { ...proposeRules(description), mode: "fallback" };
+    }
+    dispatch({ type: "proposed", proposal });
+  };
+  const toggleDictation = () => {
+    if (listening) return dictation.current?.stop();
+    const Api = dictationApi();
+    if (!Api) return;
+    const session = new Api();
+    session.lang = navigator.language || "en-US";
+    session.continuous = true;
+    session.interimResults = false;
+    session.onresult = (event) => {
+      let heard = "";
+      for (let i = event.resultIndex; i < event.results.length; i++)
+        if (event.results[i].isFinal) heard += event.results[i][0].transcript;
+      if (heard.trim())
+        setText((current) => `${current.trimEnd()} ${heard.trim()}`.trim().slice(0, 4000));
+    };
+    session.onend = () => setListening(false);
+    session.onerror = (event) => {
+      setListening(false);
+      if (event.error === "not-allowed" || event.error === "service-not-allowed")
+        dispatch({
+          type: "error",
+          message: "Microphone access was blocked. Allow it in your browser, or type instead.",
+        });
+    };
+    dictation.current = session;
+    try {
+      session.start();
+      setListening(true);
+    } catch {
+      setListening(false);
+    }
+  };
+  return (
+    <section className="describe-box" aria-label="Describe your agent">
+      <label htmlFor="agent-describe">Describe it, and Jev builds the first draft</label>
+      <textarea
+        id="agent-describe"
+        rows={3}
+        maxLength={4000}
+        placeholder="For example: Research AI news every morning and email me a short summary."
+        value={text}
+        disabled={busy}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void build();
+        }}
+      />
+      <div className="page-actions">
+        <span className="subtle">
+          <Sparkles size={15} /> Jev assumes the rest. You can change every
+          choice before you create it.
+          {canDictate && " Dictation uses your browser’s speech service."}
+        </span>
+        <span className="describe-actions">
+          {canDictate && (
+            <button
+              className="icon-button"
+              aria-label={listening ? "Stop dictation" : "Dictate your description"}
+              aria-pressed={listening}
+              disabled={busy}
+              onClick={toggleDictation}
+            >
+              <Mic size={16} />
+            </button>
+          )}
+          <button
+            className="button primary"
+            disabled={!ready || busy}
+            onClick={() => void build()}
+          >
+            {busy ? "Jev is drafting…" : "Draft my agent"}
+            <Sparkles size={16} />
+          </button>
+        </span>
+      </div>
+    </section>
+  );
+}
+export function CategoryPage({ draft, dispatch, trigger }: PageProps) {
   const [active, setActive] = useState<BuildDraft["category"]>();
   return (
     <>
@@ -84,8 +224,12 @@ export function CategoryPage({ draft, dispatch }: PageProps) {
         eyebrow="01 / A LITTLE DIRECTION"
         title="What kind of help do you need?"
       >
-        Pick a purpose. We’ll find the right skills together.
+        Say it in a sentence, or pick a purpose and build it step by step.
       </PageHeading>
+      <DescribeBox draft={draft} dispatch={dispatch} trigger={trigger} />
+      <div className="section-label">
+        <span>OR PICK A DIRECTION</span>
+      </div>
       <div className="category-grid" aria-label="Agent category">
         {categories.map((category) => (
           <button
@@ -977,6 +1121,37 @@ export function ReviewPage({ draft, dispatch, trigger }: PageProps) {
         </div>
       </div>
       <ProblemList title="Fix these before creating" problems={blocking} />
+      {draft.assumed.length > 0 && (
+        <div className="follow-up" aria-label="Jev’s assumptions">
+          <Sparkles size={18} />
+          <div>
+            <strong>Jev assumed these from your description</strong>
+            <ul className="question-list">
+              {draft.assumed.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <span className="describe-actions">
+              {(
+                [
+                  ["name", "Rename"],
+                  ["needs", "Edit the description"],
+                  ["tools", "Change skills"],
+                  ["details", "Change details"],
+                ] as const
+              ).map(([step, label]) => (
+                <button
+                  key={step}
+                  className="text-button"
+                  onClick={() => dispatch({ type: "navigate", step })}
+                >
+                  {label}
+                </button>
+              ))}
+            </span>
+          </div>
+        </div>
+      )}
       <div className="review-grid">
         <section>
           <span className="eyebrow">STARTS WITH</span>

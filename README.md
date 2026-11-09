@@ -24,6 +24,7 @@ corepack pnpm build
 ## What works
 
 - Reducer-driven creation flow: animated category → name → needs → Jev reading → advised skills → follow-up details → review/create → install. Back keeps answers; refresh starts a fresh build at step one.
+- Describe-to-create on the first page: type or dictate one sentence and Jev drafts the category, name, skills and details, then opens review with every assumption listed and editable. Rules work without a key; `JEV_API_KEY` adds a validated model pass. Dictation appears only where the browser has a speech API, which may send audio to the browser vendor.
 - Original animated SVGs imported with SVGR, a shared-layout avatar, direction-aware slide/fade transitions, dark mode and reduced-motion support.
 - Automatically generated unique triggers, editable tool selections with reasons/confidence, and catalog-owned approval requirements.
 - Jev rules for chips and whole-word keywords, plus an optional server-only model pass with an eight-second fallback.
@@ -66,6 +67,20 @@ The server creates an anonymous user on the first build POST, stores the session
 To enable Jev's optional model pass, set `JEV_API_KEY` (an Anthropic API key) and `JEV_MODEL` in the same server environment. Never prefix either with `NEXT_PUBLIC_`. `POST /api/jev` always runs rules, and only calls the model for at least 12 trimmed characters of free text. Catalog-only model picks are merged with rules, not substituted for chip picks. Invalid output, provider failure or an eight-second deadline falls back to rules. The browser also falls back if the route is unreachable. The model sees the category, chip IDs and free-text description, so keep secrets out of those fields.
 
 The optional Jev route has a per-process enhancement budget of 20 calls/minute and three concurrent model calls. Rules remain available when that budget is exhausted. For public multi-instance hosting, add authenticated user quotas and shared rate limiting before enabling a paid key. Recommendations describe capabilities; they do not connect accounts or change the Pi/MCP runtime's permissions.
+
+## Profiles and shareable setups
+
+A setup is one person's package of skills: skills referenced by their GitHub/skills.sh source, plus agents built in the workshop. `/explore` lists published setups, `/u/<handle>` is a public profile, `/u/<handle>/<setup>` shows the items with one copyable install script (`npx skills add … --skill …` per skill) and download / "Add to my agents" buttons for each agent. `/me` is where a signed-in person creates, edits, publishes or deletes their setups.
+
+To enable it, in addition to `SUPABASE_URL` and `SUPABASE_ANON_KEY`:
+
+1. Apply `supabase/migrations/202611090001_profiles_setups.sql`.
+2. In Supabase Auth, enable the GitHub provider with a GitHub OAuth app, and add `<site origin>/auth/callback` to the allowed redirect URLs.
+3. Optional: enable manual identity linking so an anonymous builder session is upgraded in place and keeps its cloud drafts. Without it, signing in starts a separate account.
+
+The profile handle is the GitHub username, read from the provider's identity record. Setups store links and agent specs only; skill code stays in its own repository and is not reviewed, and each setup page says so. Agents added to a setup publish their full instructions and configured answers. Without cloud configuration these pages say profiles are unavailable; the workshop is unaffected.
+
+Not built yet: reporting or removing someone else's setup, likes/follows/search, server-rendered link previews, skills hosted on the site (for example a private `/grill-me` that is not in a public repository), and publishing agents from another device's library. GitHub sign-in and the migration have not been exercised against a live Supabase project; SQL rules run in PGlite and browser tests mock the transport.
 
 ## Jev’s skills.sh catalog
 
