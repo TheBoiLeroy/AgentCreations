@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { exampleAgent, type AgentSpec } from "@agents/spec";
 import type { SetupItem } from "@agents/spec/setups";
-import { setupInstallScript, skillFiles } from "./index";
+import { piPackage, setupInstallScript, skillFiles } from "./index";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 /** Runs the script with sh in a throwaway HOME. A fake npx records its arguments; `npxCode` sets its exit code. */
-function run(script: string, { npx = true, npxCode = 0, env = {} as Record<string, string> } = {}) {
+function run(script: string, { npx = true, npxCode = 0, pi = false, env = {} as Record<string, string> } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "setup-install-"));
   dirs.push(dir);
   const home = join(dir, "home");
@@ -20,6 +20,10 @@ function run(script: string, { npx = true, npxCode = 0, env = {} as Record<strin
   if (npx) {
     writeFileSync(join(bin, "npx"), `#!/bin/sh\necho "$@" >> "${join(dir, "npx.log")}"\nexit ${npxCode}\n`);
     chmodSync(join(bin, "npx"), 0o755);
+  }
+  if (pi) {
+    writeFileSync(join(bin, "pi"), `#!/bin/sh\necho "$PWD $@" >> "${join(dir, "pi.log")}"\n`);
+    chmodSync(join(bin, "pi"), 0o755);
   }
   writeFileSync(join(dir, "setup.sh"), script);
   const result = spawnSync("/bin/sh", ["setup.sh"], {
@@ -78,5 +82,40 @@ describe("one-command setup install", () => {
     const script = setupInstallScript([{ kind: "agent", spec: broken, note: "" }], meta);
     expect(script).toContain("# lead-sorter skipped:");
     expect(run(script).stderr).toContain("Not installed: lead-sorter");
+  });
+});
+
+describe("Pi agents in a setup", () => {
+  const tracker: AgentSpec = {
+    ...exampleAgent,
+    name: "Agent Tracker",
+    trigger: "agent-tracker",
+    slug: "agent-tracker",
+    runtime: "extension",
+    description: "Shows a live terminal panel of session-events and process-list. Use when the user wants to see or hide this live view, or runs /agent-tracker.",
+    inputs: [],
+    method: [],
+    tools: [],
+    dataSources: ["session-events", "process-list"],
+    output: { ...exampleAgent.output, kind: "widget", template: [], destination: "Show it in the Pi terminal." },
+    skill: { whenToUse: "Use when the user wants to see or hide this live view, or runs /agent-tracker." },
+  };
+  it("writes the whole Pi package and installs it with pi when Pi is present", () => {
+    const result = run(setupInstallScript([{ kind: "agent", spec: tracker, note: "" }], meta), { pi: true });
+    expect(result.status).toBe(0);
+    const dir = join(result.home, ".agent-creations/pi-packages/agent-tracker");
+    // A here-document always ends the file with a newline; JSON stays identical once parsed.
+    for (const [path, content] of Object.entries(piPackage(tracker)))
+      expect(readFileSync(join(dir, path), "utf8")).toBe(content.endsWith("\n") ? content : `${content}\n`);
+    expect(JSON.parse(readFileSync(join(dir, "agent.json"), "utf8"))).toEqual(JSON.parse(piPackage(tracker)["agent.json"]));
+    expect(readFileSync(join(result.dir, "pi.log"), "utf8").trim()).toBe(`${dir} install .`);
+    expect(result.stdout).toContain("Installed Pi agent /agent-tracker. Restart Pi to use it.");
+    expect(existsSync(join(result.home, ".claude/skills/agent-tracker"))).toBe(false);
+  });
+  it("writes the package and says how to install it when Pi isn't installed", () => {
+    const result = run(setupInstallScript([{ kind: "agent", spec: tracker, note: "" }], meta));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Install Pi, then run:");
+    expect(existsSync(join(result.home, ".agent-creations/pi-packages/agent-tracker/extensions/agent.ts"))).toBe(true);
   });
 });

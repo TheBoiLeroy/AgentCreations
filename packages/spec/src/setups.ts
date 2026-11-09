@@ -16,6 +16,8 @@ const skillName = z
   .string()
   .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/, "Use the skill's folder name");
 const note = z.string().trim().max(300).default("");
+/** Real setups (dozens of skills plus a few agents) need more than a handful. */
+export const SETUP_MAX_ITEMS = 60;
 export const setupItemSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("skill"), repository, skill: skillName, note }).strict(),
   z.object({ kind: z.literal("agent"), spec: agentSchema, note }).strict(),
@@ -26,7 +28,7 @@ export const setupSchema = z
     title: z.string().trim().min(1, "Give your setup a title").max(80),
     slug: triggerSchema,
     description: z.string().trim().max(500),
-    items: z.array(setupItemSchema).min(1, "Add at least one skill or agent").max(30),
+    items: z.array(setupItemSchema).min(1, "Add at least one skill or agent").max(SETUP_MAX_ITEMS),
     published: z.boolean(),
   })
   .strict()
@@ -93,7 +95,7 @@ export function setupFromAgents(specs: AgentSpec[]): { title: string; descriptio
   return {
     title: "My setup",
     description: `${agents} agent${agents === 1 ? "" : "s"}${skills ? ` and ${skills} skill${skills === 1 ? "" : "s"}` : ""} I use.`,
-    items: items.slice(0, 30),
+    items: items.slice(0, SETUP_MAX_ITEMS),
   };
 }
 
@@ -190,5 +192,5 @@ export function parseSetupImport(text: string): ImportResult {
       /* Not JSON after all: read it line by line. */
     }
   trimmed.split(/\r?\n/).slice(0, 500).forEach(readLine);
-  return { items: items.slice(0, 30), names: names.slice(0, 100), problems: problems.slice(0, 20) };
+  return { items: items.slice(0, SETUP_MAX_ITEMS), names: names.slice(0, 100), problems: problems.slice(0, 20) };
 }

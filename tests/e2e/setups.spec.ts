@@ -44,7 +44,7 @@ test("find someone's setup, copy every skill and keep their agent", async ({ pag
   await expect(page.getByLabel("Install everything").locator("pre")).toHaveText(
     /^curl -fsSL 'http:\/\/127\.0\.0\.1:3100\/u\/eliancoder\/daily-driver\/install\.sh' -o setup\.sh && sh setup\.sh$/,
   );
-  await expect(page.getByLabel("Install everything")).toContainText("Adds 2 skills with “npx skills add” and writes 1 agent");
+  await expect(page.getByLabel("Install everything")).toContainText("Adds 2 skills with “npx skills add” and installs 1 agent");
   await expect(page.locator(".setup-item code").first()).toHaveText("npx skills add anthropics/skills --skill pdf");
   await expect(page.getByText("For contracts")).toBeVisible();
   await expect(page.getByText("has not reviewed that code")).toBeVisible();

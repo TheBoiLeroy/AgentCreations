@@ -7,6 +7,7 @@ import {
   parseSetupImport,
   parseSkillReference,
   setupFromAgents,
+  SETUP_MAX_ITEMS,
   setupItemSchema,
   setupSchema,
   type SetupItem,
@@ -93,15 +94,15 @@ function Editor({ start, autofill, onDone }: { start: Draft; autofill?: boolean;
   const addMany = (incoming: SetupItem[]) => {
     const keys = new Set(items.current.map(itemKey));
     const fresh = incoming.filter((item) => !keys.has(itemKey(item)) && !!keys.add(itemKey(item)));
-    const room = fresh.slice(0, Math.max(0, 30 - items.current.length));
-    if (room.length < fresh.length) setError("A setup holds up to 30 items; the rest weren’t added.");
+    const room = fresh.slice(0, Math.max(0, SETUP_MAX_ITEMS - items.current.length));
+    if (room.length < fresh.length) setError(`A setup holds up to ${SETUP_MAX_ITEMS} items; the rest weren’t added.`);
     items.current = [...items.current, ...room];
     setDraft((current) => ({ ...current, items: items.current }));
     return room.length;
   };
   const add = (item: SetupItem) => {
     if (has(item)) return setError("That’s already in this setup.");
-    if (draft.items.length >= 30) return setError("A setup holds up to 30 items.");
+    if (draft.items.length >= SETUP_MAX_ITEMS) return setError(`A setup holds up to ${SETUP_MAX_ITEMS} items.`);
     setError("");
     addMany([item]);
   };

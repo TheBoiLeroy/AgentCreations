@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, Copy, Download, Plus, ShieldCheck, User } from "lucide-react";
 import { z } from "zod";
-import { installScript, setupItemSchema, skillCommand, type SetupItem } from "@agents/spec/setups";
-import { archive, skillFiles } from "@agents/exporters";
+import { installScript, setupItemSchema, skillCommand, SETUP_MAX_ITEMS, type SetupItem } from "@agents/spec/setups";
+import { archive, piPackage, skillFiles } from "@agents/exporters";
 import { addToLibrary } from "../lib/library";
 import { AgentIcon } from "./agent-icon";
 import { download } from "./install-page";
@@ -153,7 +153,7 @@ export function SetupPage({ handle, slug }: { handle: string; slug: string }) {
   );
   const [notice, setNotice] = useState("");
   // Stored content is other people's data: validate before rendering or exporting it.
-  const parsed = data && z.array(setupItemSchema).max(30).safeParse(data.setup.items);
+  const parsed = data && z.array(setupItemSchema).max(SETUP_MAX_ITEMS).safeParse(data.setup.items);
   const items: SetupItem[] = parsed?.success ? parsed.data : [];
   const script = installScript(items);
   const [origin, setOrigin] = useState("");
@@ -203,7 +203,8 @@ export function SetupPage({ handle, slug }: { handle: string; slug: string }) {
               </div>
               <p className="install-note hint">
                 Adds {items.length - agents.length} skill{items.length - agents.length === 1 ? "" : "s"} with “npx skills add” and
-                writes {agents.length} agent{agents.length === 1 ? "" : "s"} to ~/.claude/skills, skipping any that already exist.
+                installs {agents.length} agent{agents.length === 1 ? "" : "s"} (skills go to ~/.claude/skills, live Pi agents through
+                “pi install”), skipping any that already exist.
                 For one project, run <code>SKILLS_DIR=.claude/skills sh setup.sh</code>.{" "}
                 <a href={scriptUrl} target="_blank" rel="noopener noreferrer">
                   Read the script first
@@ -260,14 +261,17 @@ export function SetupPage({ handle, slug }: { handle: string; slug: string }) {
                       className="button"
                       onClick={() => {
                         try {
-                          download(`${spec.slug}-skill.zip`, archive(skillFiles(spec)), "application/zip");
+                          // Live agents are Pi extensions, not skills.
+                          if (spec.runtime === "extension")
+                            download(`${spec.slug}-pi.zip`, archive(piPackage(spec), `${spec.slug}-pi`), "application/zip");
+                          else download(`${spec.slug}-skill.zip`, archive(skillFiles(spec)), "application/zip");
                           setNotice("Download ready. Review the files before installing.");
                         } catch (error) {
                           setNotice(error instanceof Error ? error.message : "This agent can’t be exported as a skill.");
                         }
                       }}
                     >
-                      <Download size={14} /> Download skill
+                      <Download size={14} /> {spec.runtime === "extension" ? "Download Pi package" : "Download skill"}
                     </button>
                     <button
                       className="button"

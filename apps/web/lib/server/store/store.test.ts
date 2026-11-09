@@ -106,6 +106,12 @@ describe("profiles and setups", () => {
     await expect(updateSetup(db, ian.id, saved.id, setup(), 1)).rejects.toBeInstanceOf(StoreConflict);
     await expect(upsertProfile(db, sam.id, { login: "IAN", name: null, avatar_url: null })).rejects.toBeInstanceOf(HandleTaken);
   });
+  it("holds up to 60 items and keeps rows through the rebuild migration", async () => {
+    await upsertProfile(db, ian.id, { login: "ian", name: null, avatar_url: null });
+    const many = Array.from({ length: 60 }, (_, i) => ({ kind: "skill" as const, repository: "a/b", skill: `s${i}`, note: "" }));
+    expect((await createSetup(db, ian.id, { ...setup(), items: many })).item_count).toBe(60);
+    await expect(createSetup(db, ian.id, { ...setup("too-many"), items: [...many, { ...many[0], skill: "s60" }] })).rejects.toThrow(/constraint/i);
+  });
   it("rejects malformed items at the database too", async () => {
     await upsertProfile(db, ian.id, { login: "ian", name: null, avatar_url: null });
     for (const items of [[], "nope", ["x".repeat(65000)]])

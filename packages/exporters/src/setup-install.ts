@@ -2,7 +2,7 @@
 // validated items. Skill tokens are already shell-safe; every other value is single-quoted
 // or written through a quoted here-document, so nothing in an agent's text is ever executed.
 import type { SetupItem } from "@agents/spec/setups";
-import { skillFiles } from "./index";
+import { piPackage, skillFiles } from "./index";
 
 // Web Crypto: this module is also bundled into browser pages, where node:crypto doesn't exist.
 const randomHex = () =>
@@ -27,8 +27,10 @@ export function setupInstallScript(items: SetupItem[], meta: InstallMeta): strin
     `# were written by @${comment(meta.handle)}. Agent Creations has not reviewed either.`,
     "# Agents go to $SKILLS_DIR (default ~/.claude/skills). For one project instead:",
     "#   SKILLS_DIR=.claude/skills sh setup.sh",
+    "# Pi agents (live terminal panels) are written to $PI_PACKAGES_DIR and installed with `pi install .`.",
     "set -u",
     'SKILLS_DIR="${SKILLS_DIR:-$HOME/.claude/skills}"',
+    'PI_PACKAGES_DIR="${PI_PACKAGES_DIR:-$HOME/.agent-creations/pi-packages}"',
     'installed=0; skipped=0; failed=""',
     `echo ${quote(`Installing "${meta.title}" by @${meta.handle}: ${skills.length} skill${skills.length === 1 ? "" : "s"}, ${agents.length} agent${agents.length === 1 ? "" : "s"}`)}`,
     "",
@@ -42,8 +44,54 @@ export function setupInstallScript(items: SetupItem[], meta: InstallMeta): strin
       );
     lines.push("else", `  echo ${quote(`npx was not found. Install Node.js, then run this again to add: ${all}`)} >&2`, `  failed="$failed ${all}"`, "fi", "");
   }
-  if (agents.length) lines.push('mkdir -p "$SKILLS_DIR" || exit 1', "");
-  for (const spec of agents) {
+  const skillAgents = agents.filter((spec) => spec.runtime !== "extension");
+  const piAgents = agents.filter((spec) => spec.runtime === "extension");
+  if (skillAgents.length) lines.push('mkdir -p "$SKILLS_DIR" || exit 1', "");
+  // A here-document delimiter that can't occur as a line of `content`.
+  const delimiter = (content: string) => {
+    let tag = `AC_SKILL_${meta.nonce || randomHex()}`;
+    while (content.split("\n").includes(tag)) tag += "_";
+    return tag;
+  };
+  for (const spec of piAgents) {
+    let files: Record<string, string>;
+    try {
+      files = piPackage(spec);
+    } catch (error) {
+      lines.push(`# ${spec.slug} skipped: ${comment((error as Error).message)}`, `failed="$failed ${spec.slug}"`, "");
+      continue;
+    }
+    const dir = `"$PI_PACKAGES_DIR"/${quote(spec.slug)}`;
+    lines.push(
+      `if [ -e ${dir} ]; then`,
+      `  echo "Skipped ${spec.slug}: $PI_PACKAGES_DIR/${spec.slug} already exists"; skipped=$((skipped + 1))`,
+      `elif mkdir -p ${dir}; then`,
+      "  ok=1",
+    );
+    for (const [path, content] of Object.entries(files)) {
+      const target = `${dir}/${quote(path)}`;
+      const tag = delimiter(content);
+      lines.push(
+        `  mkdir -p "$(dirname ${target})" && cat > ${target} <<'${tag}' || ok=0`,
+        content.replace(/\n$/, ""),
+        tag,
+      );
+    }
+    lines.push(
+      '  if [ "$ok" = 1 ] && command -v pi >/dev/null 2>&1; then',
+      `    if (cd ${dir} && pi install .); then echo "Installed Pi agent /${spec.slug}. Restart Pi to use it."; installed=$((installed + 1)); else failed="$failed ${spec.slug}"; fi`,
+      '  elif [ "$ok" = 1 ]; then',
+      `    echo "Wrote Pi agent /${spec.slug} to $PI_PACKAGES_DIR/${spec.slug}. Install Pi, then run: cd \"$PI_PACKAGES_DIR/${spec.slug}\" && pi install ."; installed=$((installed + 1))`,
+      "  else",
+      `    failed="$failed ${spec.slug}"`,
+      "  fi",
+      "else",
+      `  failed="$failed ${spec.slug}"`,
+      "fi",
+      "",
+    );
+  }
+  for (const spec of skillAgents) {
     let content: string;
     try {
       content = Object.values(skillFiles(spec))[0];
@@ -51,9 +99,7 @@ export function setupInstallScript(items: SetupItem[], meta: InstallMeta): strin
       lines.push(`# ${spec.slug} skipped: ${comment((error as Error).message)}`, `failed="$failed ${spec.slug}"`, "");
       continue;
     }
-    // A delimiter that can't occur as a line of the file.
-    let tag = `AC_SKILL_${meta.nonce || randomHex()}`;
-    while (content.split("\n").includes(tag)) tag += "_";
+    const tag = delimiter(content);
     const dir = `"$SKILLS_DIR"/${quote(spec.slug)}`;
     lines.push(
       `if [ -e ${dir} ]; then`,

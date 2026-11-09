@@ -100,4 +100,28 @@ create table catalog_audit (
 );
 `,
   },
+  {
+    // Setups may hold up to 60 items. SQLite can't alter a check, so the table is rebuilt.
+    id: "0002_setups_60_items",
+    sql: `
+create table setups_next (
+  id text primary key,
+  user_id text not null references profiles(user_id) on delete cascade,
+  slug text not null check (length(slug) <= 64 and slug not glob '*[^a-z0-9-]*' and slug not glob '-*' and slug not glob '*-' and slug not glob '*--*'),
+  title text not null check (length(title) between 1 and 80),
+  description text not null default '' check (length(description) <= 500),
+  items text not null check (json_valid(items) and json_type(items) = 'array' and json_array_length(items) between 1 and 60 and length(items) <= 64000),
+  item_count integer not null check (item_count = json_array_length(items)),
+  published integer not null default 0 check (published in (0, 1)),
+  revision integer not null default 1,
+  updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  unique (user_id, slug)
+);
+insert into setups_next (id, user_id, slug, title, description, items, item_count, published, revision, updated_at)
+  select id, user_id, slug, title, description, items, item_count, published, revision, updated_at from setups;
+drop table setups;
+alter table setups_next rename to setups;
+create index setups_recent on setups(published, updated_at desc);
+`,
+  },
 ];
