@@ -10,7 +10,7 @@ The current implementation is the **stage-one backend foundation**, not the comp
 
 ## Implemented
 
-- `202610180002_skill_catalog.sql`: staged catalog generations, atomic publication, operator-managed maintainer membership, curation overlays, expected-revision conflicts, and append-only audit events.
+- Catalog tables in `apps/web/lib/server/store/migrations.ts` and transactions in `store/catalog.ts` (formerly `202610180002_skill_catalog.sql`): staged catalog generations, atomic publication, operator-managed maintainer membership, curation overlays, expected-revision conflicts, and append-only audit events.
 - A bounded skills.sh adapter using the documented `/api/v1/skills` all-time listing. Fetches at most one 500-entry page per request, with a 15-second source deadline, a 2 MB streamed-byte limit, fixed source URL, redirect rejection, identity/link validation, and pagination checks.
 - `GET /api/catalog`: honest bundled-mode status and published-index freshness/coverage when available.
 - `GET /api/catalog/manage`: maintainer-only recent sync progress.
@@ -25,13 +25,12 @@ Each advance request stages one validated page. Only the final page of a complet
 
 No infrastructure is provisioned by this change.
 
-1. Configure the existing server-only `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
-2. Apply `supabase/migrations/202610180002_skill_catalog.sql` through your migration process. Keep RLS enabled.
-3. Have a database operator add an existing **non-anonymous** Supabase account's UUID to `public.catalog_maintainers`. The application cannot grant itself this membership. Do not add anonymous builder accounts.
-4. Enable Vercel OIDC for the deployed Vercel project. The adapter reads `VERCEL_OIDC_TOKEN` fresh on each request, following the documented raw-token production integration. Never expose it through `NEXT_PUBLIC_`, pass it from browser input, or commit it. Local tokens expire and need refreshing; automatic local token refresh is not implemented.
-5. Authenticate management calls with the maintainer's Supabase session cookies or short-lived Supabase user access token in `Authorization: Bearer …`. There is no shared administrator password or service-role key. The database independently enforces membership and non-anonymous identity.
+1. Storage is the site's libSQL database (local file by default, Turso Cloud via `TURSO_DATABASE_URL`); its migrations apply automatically.
+2. Sign in on the site with GitHub (or the local dev sign-in), then make that account a maintainer: `corepack pnpm db maintainer <handle>`. The application cannot grant itself this membership, and anonymous builder accounts never qualify.
+3. Enable Vercel OIDC for the deployed Vercel project. The adapter reads `VERCEL_OIDC_TOKEN` fresh on each request, following the documented raw-token production integration. Never expose it through `NEXT_PUBLIC_`, pass it from browser input, or commit it. Local tokens expire and need refreshing; automatic local token refresh is not implemented.
+4. Management calls authenticate with the maintainer's session cookie. There is no shared administrator password or bearer-token path.
 
-There is not yet a maintainer sign-in page or management UI. Account provisioning and authentication use your existing Supabase account tooling. Missing source authentication returns 503 for sync operations; curation remains available if database authentication is configured.
+There is not yet a management UI. Missing source authentication returns 503 for sync operations; curation still works.
 
 ## Management request bodies
 
@@ -76,7 +75,7 @@ The sync never writes curation records. Only the curation RPC writes them, recor
 - A daily scheduler/worker with durable retries, run monitoring, and a defined machine identity. The APIs are resumable building blocks; **nothing currently runs on a daily schedule**.
 - Prioritized detail, content-hash, and upstream audit ingestion. Current sync is listing metadata only.
 - Staged/superseded generation retention and cleanup policy. Current implementation retains all generations; avoid unattended repeated runs until retention is implemented.
-- Live Supabase migration, authentication, and Vercel/skills.sh API verification. Tests use mocked transport and PGlite; they do not prove live service access.
+- Vercel/skills.sh API verification. Tests use mocked transport and an in-memory libSQL database; they do not prove live service access.
 
 ## Requirements for later stages
 

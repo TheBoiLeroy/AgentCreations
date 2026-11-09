@@ -156,11 +156,16 @@ export function SetupPage({ handle, slug }: { handle: string; slug: string }) {
   const parsed = data && z.array(setupItemSchema).max(30).safeParse(data.setup.items);
   const items: SetupItem[] = parsed?.success ? parsed.data : [];
   const script = installScript(items);
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
+  const scriptUrl = data ? `${origin}/u/${data.profile.handle}/${data.setup.slug}/install.sh` : "";
+  // Download, then run: the skills CLI can still ask questions in your terminal (a piped script can't).
+  const command = `curl -fsSL '${scriptUrl}' -o setup.sh && sh setup.sh`;
   const agents = items.flatMap((item) => (item.kind === "agent" ? [item] : []));
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(script);
-      setNotice("Copied the install script.");
+      await navigator.clipboard.writeText(command);
+      setNotice("Copied the install command.");
     } catch {
       setNotice("Clipboard unavailable. Select and copy the text manually.");
     }
@@ -184,6 +189,28 @@ export function SetupPage({ handle, slug }: { handle: string; slug: string }) {
             <div role="status" className="notice">
               {notice}
             </div>
+          )}
+          {items.length > 0 && origin && (
+            <section aria-label="Install everything">
+              <div className="install-card">
+                <div className="code-label">
+                  <span>INSTALL EVERYTHING · ONE COMMAND</span>
+                  <button onClick={() => void copy()}>
+                    <Copy size={14} /> Copy
+                  </button>
+                </div>
+                <pre>{command}</pre>
+              </div>
+              <p className="install-note hint">
+                Adds {items.length - agents.length} skill{items.length - agents.length === 1 ? "" : "s"} with “npx skills add” and
+                writes {agents.length} agent{agents.length === 1 ? "" : "s"} to ~/.claude/skills, skipping any that already exist.
+                For one project, run <code>SKILLS_DIR=.claude/skills sh setup.sh</code>.{" "}
+                <a href={scriptUrl} target="_blank" rel="noopener noreferrer">
+                  Read the script first
+                </a>
+                .
+              </p>
+            </section>
           )}
           {script && (
             <>
@@ -210,15 +237,6 @@ export function SetupPage({ handle, slug }: { handle: string; slug: string }) {
                     </div>
                   ),
               )}
-              <div className="install-card">
-                <div className="code-label">
-                  <span>INSTALL EVERY SKILL</span>
-                  <button onClick={() => void copy()}>
-                    <Copy size={14} /> Copy
-                  </button>
-                </div>
-                <pre>{script}</pre>
-              </div>
               <p className="safety">
                 <ShieldCheck size={17} /> These commands install code from each skill’s own repository. Agent
                 Creations stores the links only and has not reviewed that code. Read each source before you run it.

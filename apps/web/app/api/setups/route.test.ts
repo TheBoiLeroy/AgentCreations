@@ -83,3 +83,34 @@ describe("setups API", () => {
     expect((await GET(new Request("http://localhost/api/setups?handle=bad%20handle"))).status).toBe(400);
   });
 });
+import { POST as resolve } from "./resolve/route";
+import { GET as installScript } from "../../u/[handle]/[slug]/install.sh/route";
+describe("import lookup and install script", () => {
+  it("resolves bare names from the catalog and published setups only", async () => {
+    await signIn();
+    await POST(post("/api/setups", { ...setup, items: [{ kind: "skill", repository: "mattpocock/skills", skill: "grill-me", note: "" }] }));
+    await POST(post("/api/setups", { ...setup, slug: "hidden", published: false, items: [{ kind: "skill", repository: "private/repo", skill: "secret", note: "" }] }));
+    const { matches } = await (await resolve(post("/api/setups/resolve", { names: ["grill-me", "pptx", "secret", "unknown"] }))).json();
+    expect(matches).toEqual({
+      "grill-me": [{ repository: "mattpocock/skills", skill: "grill-me", from: "setups", uses: 1 }],
+      pptx: [{ repository: "anthropics/skills", skill: "pptx", from: "catalog", uses: 0 }],
+      secret: [],
+      unknown: [],
+    });
+    expect((await resolve(post("/api/setups/resolve", { names: ["Bad Name"] }))).status).toBe(400);
+  });
+  it("serves a shell script for published setups and nothing for private ones", async () => {
+    await signIn();
+    await POST(post("/api/setups", setup));
+    await POST(post("/api/setups", { ...setup, slug: "hidden", published: false }));
+    jar.clear();
+    const params = (slug: string) => ({ params: Promise.resolve({ handle: "eliancoder", slug }) });
+    const response = await installScript(new Request("http://127.0.0.1:3000/u/eliancoder/daily-driver/install.sh", { headers: { host: "127.0.0.1:3000" } }), params("daily-driver"));
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    const script = await response.text();
+    expect(script).toMatch(/^#!\/bin\/sh\n/);
+    expect(script).toContain("npx skills add 'anthropics/skills' --skill 'pdf'");
+    expect(script).toContain("# Source: http://127.0.0.1:3000/u/eliancoder/daily-driver");
+    expect((await installScript(new Request("http://localhost/x"), params("hidden"))).status).toBe(404);
+  });
+});

@@ -71,7 +71,7 @@ Implemented:
 - Model-dependent selections choose workers before considering live wording. Explicit incompatible extension overrides block review/spec creation. Imported specs still undergo existing defensive exporter checks.
 - Selected permissions are shown before review. Runtime override and live watch/display controls are collapsed under Advanced controls.
 - Catalog browsing is grouped by category. Empty searches show missing-skill options; only Request it is operational.
-- `POST /api/skill-requests` logs one vote per normalized term and authenticated browser owner. Apply `supabase/migrations/202610250001_skill_requests.sql`; RLS ownership and vote uniqueness are tested with PGlite. No live migration was applied.
+- `POST /api/skill-requests` logs one vote per normalized term and authenticated browser owner. Stored in the libSQL `skill_requests` table; ownership and vote uniqueness are tested against libSQL.
 
 Still unimplemented (not represented as working):
 

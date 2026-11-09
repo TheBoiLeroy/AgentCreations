@@ -7,7 +7,15 @@
 - Jev turns the form into a spec: `classifyRuntime` (worker vs extension; ask on conflict), `suggestDetails` (defaults for the details page; never chip labels as input text), `pendingQuestions` (blocks review) and `createAgentSpec`. Never write placeholder text into a spec.
 - Describe-to-create (`packages/jev/src/describe.ts`) turns one typed or dictated sentence into a whole draft through the same functions, then the `proposed` reducer action lands on review, or on details when questions remain. Every default it fills goes in `draft.assumed` and is shown on review; any user edit clears that list. Keyword-only external skills are suggested but left off. Never take an email address or other identity from the model.
 - Add a page by extending `steps`/`BuildDraft`, then the single reducer in `apps/web/lib/build-machine.ts`, its guarded transitions and restore behavior. Give the page its own component in `components/build-pages.tsx` and wire progress/Back in `app/page.tsx`. Test refresh and backward navigation with every new answer field.
-- `use-build.ts` owns local recovery and serialized cloud saves. Preserve revision conflicts: stale writes must fail rather than overwrite. Cloud rows are owner-scoped through Supabase RLS and an invoker RPC. Apply schema changes through `supabase/migrations` and test the actual SQL in PGlite.
+- `use-build.ts` owns local recovery and serialized saves. Preserve revision conflicts: stale writes must fail rather than overwrite.
+
+## Storage and sign-in
+
+- Storage is libSQL (Turso): a local file at `.data/agent-creations.db` by default, Turso Cloud when `TURSO_DATABASE_URL` is set. `apps/web/lib/server/store/db.ts` opens it once per process and applies `store/migrations.ts`. Add a new migration to the end; never edit one that has been applied. Keep the schema readable by Turso's own `tursodb` CLI (no stored generated columns).
+- SQLite has no row-level security. Every read and write goes through a store function that takes the owner's user id and puts it in the `where` clause; route handlers never write SQL. Test ownership, conflicts and visibility in `store/store.test.ts` against a real in-memory database.
+- Sessions are random tokens in an HttpOnly cookie; only their SHA-256 is stored. Visitors get an anonymous account on their first save. GitHub sign-in (`/auth/sign-in`, `/auth/callback`) upgrades that account in place, and the profile handle comes from the GitHub login, never from a form. The access token is used once and not stored.
+- `/auth/dev-sign-in` exists for local work without an OAuth app. It must stay limited to `NODE_ENV=development` on a loopback host; never widen it.
+- `corepack pnpm db migrate | where | maintainer <handle>` manages the local database.
 
 ## Icons and motion
 
@@ -41,6 +49,9 @@
 - `POST /api/jev` with `{ verify: spec }` is the model completeness check. It returns one verdict per requirement id or `unavailable`; it never reports a pass it did not make.
 
 ## Profiles and setups
+
+- Setups can start from the user's agents (`setupFromAgents`), or be imported (`parseSetupImport`): links, commands, GitHub skill folders, agent or setup JSON, frontmatter, and bare names. Bare names are resolved by `POST /api/setups/resolve` from the curated catalog, published setups and the synced index only; nothing is sent to another service.
+- `/u/<handle>/<slug>/install.sh` is the one-command install (`setupInstallScript`). Only validated tokens reach the script unquoted; titles are single-quoted and agent files go through a quoted here-document whose delimiter can't appear in the file. Keep the sh-execution tests in `setup-install.test.ts` passing when changing it, and never pipe it to `sh` in docs: the skills CLI may need the terminal.
 
 - A setup is a published package: skills referenced by `owner/repository` + skill name, and agent specs built here. Its contract, the pasted-reference parser and the install script live in `packages/spec/src/setups.ts` (`@agents/spec/setups`). The site never stores or serves third-party skill code.
 - Repository and skill tokens end up in copyable shell commands. Keep their patterns free of spaces and shell metacharacters, and validate stored items again in the browser before rendering or exporting them.

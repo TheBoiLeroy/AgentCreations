@@ -28,7 +28,7 @@ corepack pnpm build
 - Original animated SVGs imported with SVGR, a shared-layout avatar, direction-aware slide/fade transitions, dark mode and reduced-motion support.
 - Automatically generated unique triggers, editable tool selections with reasons/confidence, and catalog-owned approval requirements.
 - Jev rules for chips and whole-word keywords, plus an optional server-only model pass with an eight-second fallback.
-- Local recovery, an optional Supabase `agent_builds` backend, serialized PATCH saves, owner-scoped RLS, revision conflict checks, and a unique `(user_id, trigger)` index.
+- Local recovery, a local Turso (libSQL) database for drafts, serialized PATCH saves, owner-scoped queries, revision conflict checks, and a unique `(user_id, trigger)` index.
 - Created-agent library, v1/v2/v3 JSON import, skill ZIPs, Pi package ZIPs, install instructions and first-task prompts.
 - Strict v3 Zod schema (with v1/v2 import migrations); JSON Schema available at `/api/schema`. v3 adds `runtime`, typed `inputs`, `output.kind`/`template`, `method`, `dataSources`, `conversation` and `skill.whenToUse`.
 - Generator pipeline: classify the runtime (one-shot worker or long-running extension), ask follow-up questions for anything the template needs, write v3 with no placeholder text, run export checks, and emit from the chosen template. Any export check stops the download and shows the reason.
@@ -41,7 +41,7 @@ corepack pnpm build
 - `apps/web` — Next.js / React / Tailwind / Framer Motion website and draft/Jev APIs. SVGR imports directly from root `agent-icons`, the only asset source.
 - `packages/spec` — schemas, draft shape, category metadata, trigger helpers, v1/v2 migration, target-independent export checks and the portable prompt renderer.
 - `packages/jev` — catalog, chips, rules, optional-model orchestration and spec assembly.
-- `supabase/migrations` — owner-scoped draft table and atomic save/trigger-allocation transaction. SQL is tested with an embedded Postgres engine (PGlite).
+- `apps/web/lib/server/store` — the libSQL schema, migrations and every owner-scoped query, tested against a real in-memory libSQL engine. Previously `supabase/migrations`, tested with an embedded Postgres engine (PGlite).
 - `packages/exporters` — pure spec-to-files adapters, ZIP creation and installation guidance.
 - `packages/pi-runner` — standalone extension source included in each exported package.
 - `apps/mcp-server` — single-owner hosted runtime; no cloud infrastructure is created by the website.
@@ -58,9 +58,9 @@ work](docs/propose-and-correct-implementation.md) before continuing the rollout.
 
 ## Configure the new creation flow
 
-The new flow runs without any services: drafts recover from local storage and Jev uses deterministic rules. To enable cloud drafts, copy `apps/web/.env.example` to `apps/web/.env.local`, set `SUPABASE_URL` and `SUPABASE_ANON_KEY`, apply `supabase/migrations/202610180001_agent_builds.sql` through your Supabase migration process, and enable anonymous sign-ins in Supabase Auth. Restart Next.js after changing environment variables. Use the anon/publishable key, not the service-role key; RLS must remain active.
+Everything runs locally with no accounts or services. The first request creates a Turso (libSQL) database file at `.data/agent-creations.db` (ignored by git) and applies its migrations; `corepack pnpm db where` prints its location and `corepack pnpm db migrate` creates it ahead of time. Inspect it with Turso's CLI: `~/.turso/tursodb --readonly .data/agent-creations.db`. To use Turso Cloud instead, set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in `apps/web/.env.local` (copy `apps/web/.env.example`) and restart Next.js.
 
-The server creates an anonymous user on the first build POST, stores the session in HTTP-only cookies, and scopes every read/write to that owner. `POST /api/agent-builds` creates a draft; `PATCH /api/agent-builds/:id` saves a validated snapshot plus the expected revision. Page changes save immediately; text edits debounce for 450 ms. Requests are serialized and revisions increase after each successful write. A database transaction reserves the trigger when the name is saved, adds suffixes for collisions, and applies the same trigger to the final spec. Cloud-backed uniqueness is authoritative; local-only uniqueness covers created agents on that device.
+The server creates an anonymous account on the first build POST and keeps a random session token in an HTTP-only cookie (only its hash is stored). Every read and write is scoped to that owner in the query itself, since SQLite has no row-level security. `POST /api/agent-builds` creates a draft; `PATCH /api/agent-builds/:id` saves a validated snapshot plus the expected revision. Page changes save immediately; text edits debounce for 450 ms. Requests are serialized and revisions increase after each successful write. A write transaction reserves the trigger when the name is saved, adds suffixes for collisions, and applies the same trigger to the final spec.
 
 `GET /api/agent-builds/:id` reloads a draft; `GET /api/agent-builds` lists the most recent 100 builds for that browser session. A local recovery snapshot is retained even with cloud sync. Opening or refreshing the page starts a new build at step one rather than automatically restoring a local or cloud draft. On conflict, the UI preserves the local answers and offers retry or an explicit cloud reload rather than overwriting. Clearing both cookies and local storage loses access to an anonymous account; download JSON backups. Cross-device identity requires a future account-linking flow.
 
@@ -82,15 +82,21 @@ Email addresses are per-user settings (`EMAIL_TO` for Pi) and are never written 
 
 A setup is one person's package of skills: skills referenced by their GitHub/skills.sh source, plus agents built in the workshop. `/explore` lists published setups, `/u/<handle>` is a public profile, `/u/<handle>/<setup>` shows the items with one copyable install script (`npx skills add … --skill …` per skill) and download / "Add to my agents" buttons for each agent. `/me` is where a signed-in person creates, edits, publishes or deletes their setups.
 
-To enable it, in addition to `SUPABASE_URL` and `SUPABASE_ANON_KEY`:
+**Making a setup.** On `/me`, "Start from my agents" fills a new setup with every agent you built (on this device and saved to the database) plus the external skills they use. "Import your setup" accepts skills.sh links, `npx skills add … --skill …` commands, GitHub skill folder links, agent or setup JSON files, SKILL.md frontmatter, and plain skill names such as the output of `ls ~/.claude/skills`. Plain names are matched to your own agents, then looked up in the curated catalog, other people's published setups and the synced skills.sh index; ambiguous names ask you to pick, and names with no public source are listed for you to link.
 
-1. Apply `supabase/migrations/202611090001_profiles_setups.sql`.
-2. In Supabase Auth, enable the GitHub provider with a GitHub OAuth app, and add `<site origin>/auth/callback` to the allowed redirect URLs.
-3. Optional: enable manual identity linking so an anonymous builder session is upgraded in place and keeps its cloud drafts. Without it, signing in starts a separate account.
+**Copying a setup.** Each setup page shows one command:
 
-The profile handle is the GitHub username, read from the provider's identity record. Setups store links and agent specs only; skill code stays in its own repository and is not reviewed, and each setup page says so. Agents added to a setup publish their full instructions and configured answers. Without cloud configuration these pages say profiles are unavailable; the workshop is unaffected.
+```sh
+curl -fsSL '<site>/u/<handle>/<setup>/install.sh' -o setup.sh && sh setup.sh
+```
 
-Not built yet: reporting or removing someone else's setup, likes/follows/search, server-rendered link previews, skills hosted on the site (for example a private `/grill-me` that is not in a public repository), and publishing agents from another device's library. GitHub sign-in and the migration have not been exercised against a live Supabase project; SQL rules run in PGlite and browser tests mock the transport.
+It runs `npx skills add` for each skill and writes each agent's SKILL.md into `~/.claude/skills` (or `SKILLS_DIR`), skipping anything already there, then reports what failed. The script is downloaded first rather than piped to `sh` so the skills CLI can still ask questions in your terminal. Read it first: the link is on the page.
+
+**Signing in.** Profiles need a GitHub OAuth app: create one at https://github.com/settings/developers with the callback URL `<site>/auth/callback` (locally `http://127.0.0.1:3000/auth/callback`), then set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and, in production, `APP_URL`. Signing in upgrades your anonymous account in place, so drafts stay yours. Without an OAuth app, `next dev` on your own machine offers a dev sign-in by handle on `/me`; it doesn't exist in production builds or on other hosts.
+
+The profile handle is your GitHub username. Setups store links and agent specs only; skill code stays in its own repository and is not reviewed, and each setup page says so. Agents added to a setup publish their full instructions and configured answers (never email addresses, which are per-user settings).
+
+Not built yet: reporting or removing someone else's setup, likes/follows/search, server-rendered link previews, and skills hosted on the site (for example a private `/grill-me` that is not in a public repository). GitHub sign-in has been tested with a mocked GitHub; a real OAuth app has not been used yet.
 
 ## Jev’s skills.sh catalog
 
@@ -110,13 +116,13 @@ Pi exports of that path work without extra installs. `web-search` bundles `web_s
 
 Drafts default missing `details.skillAnswers` to `{}`. New v3 exports optionally carry `skillAnswers`, with the configured values also rendered as data in their instructions; existing imports remain valid. Every curated catalog entry now exposes the skill metadata contract in `packages/spec/src/skills.ts`. This does not migrate the separate synchronized catalog or enable custom/imported skill creation.
 
-Empty skill searches offer an operational **Request it** action. Apply `supabase/migrations/202610250001_skill_requests.sql` after configuring Supabase auth. It records one normalized search term per authenticated browser owner with RLS; maintainers can aggregate `count(*)` grouped by `search_term` using an administrative database connection. The public API cannot read other owners’ requests. Without cloud configuration, requests fail visibly rather than pretending to save.
+Empty skill searches offer an operational **Request it** action. It records one normalized search term per browser account in the `skill_requests` table; aggregate with `select search_term, count(*) from skill_requests group by 1`. The public API cannot read anyone's requests.
 
 Custom-skill generation, GitHub/MCP import and real test runs are **not implemented**. The disabled test-send control explains the missing execution service. No mailbox is connected, no email is sent, and no skill is marked tested. See `docs/skill flow exe.md` for implementation status and remaining work.
 
 ### Maintained catalog rollout
 
-The stage-one backend foundation for a synchronized skills.sh catalog is now available: a staged index with atomic publication, maintainer-only synchronization/curation APIs, revision conflicts, and an audit trail. It does **not yet replace Jev’s bundled recommendations**, schedule daily refreshes, or provide a catalog-management UI. See [catalog setup, API operations, and remaining rollout work](docs/skill-catalog.md). The migration has SQL-engine tests but has not been applied to a live Supabase project.
+The stage-one backend foundation for a synchronized skills.sh catalog is now available: a staged index with atomic publication, maintainer-only synchronization/curation APIs, revision conflicts, and an audit trail. It does **not yet replace Jev’s bundled recommendations**, schedule daily refreshes, or provide a catalog-management UI. See [catalog setup, API operations, and remaining rollout work](docs/skill-catalog.md). Its rules are tested against a real libSQL engine.
 
 ## Local installation
 
@@ -162,10 +168,10 @@ docker run --rm -p 127.0.0.1:3001:3001 --env-file .env \
 
 ## Deliberate scope boundaries
 
-Supabase draft persistence and anonymous server-side authentication are now implemented, but this repository has no configured cloud credentials or deployed migration. Without configuration the UI explicitly uses device-only storage. Anonymous auth identifies this browser; cross-device account login/linking, app OAuth connections, billing, generated-file cloud storage, npm publishing automation and automatic deployment remain outside this round. The UI uses native accessible controls rather than adding a shadcn component layer.
+Drafts, profiles and setups are stored in a local Turso database by default. Anonymous sessions identify this browser until you sign in with GitHub; merging two existing accounts, app OAuth connections, billing, generated-file cloud storage, npm publishing automation and automatic deployment remain outside this round. The UI uses native accessible controls rather than adding a shadcn component layer.
 
 To distribute an exported Pi package through npm, choose a package name/scope you own, review the generated code, update its manifest, and publish explicitly. Only then advertise `pi install npm:@your-scope/<agent>`. Local package changes require replacing exported files; npm/git updates depend on the installed version/ref. See `Agent Integration Plan.md` for the broader product direction.
 
 ## Verification scope
 
-Vitest covers schemas/migration, trigger collisions, Jev chip/keyword/default/model/timeout behavior, reducer navigation, API validation, exporters, the tool registry and export checks, generated worker/extension lifecycles, the bundled calc and extract tools, regression fixtures for the original Agent Tracker and Estimates forms (including a typecheck of both generated packages against `@earendil-works/pi-coding-agent`) and real MCP protocol exchanges with a mocked model. PGlite executes the actual SQL migration and tests RLS ownership, unique triggers, revision conflicts and saved-spec allocation. Playwright covers the full desktop/mobile flow, Back, refresh, imports, duplicate names, downloads, tool toggles, Jev failures, mocked cloud PATCH/restore, dark mode and reduced motion. Live Supabase and paid-provider execution require your credentials and are not exercised by these tests.
+Vitest covers schemas/migration, trigger collisions, Jev chip/keyword/default/model/timeout behavior, reducer navigation, API validation, exporters, the tool registry and export checks, generated worker/extension lifecycles, the bundled calc and extract tools, regression fixtures for the original Agent Tracker and Estimates forms (including a typecheck of both generated packages against `@earendil-works/pi-coding-agent`) and real MCP protocol exchanges with a mocked model. An in-memory libSQL database runs the real migrations and tests ownership, unique triggers, revision conflicts, saved-spec allocation, setup visibility and catalog publication. Playwright covers the full desktop/mobile flow, Back, refresh, imports, duplicate names, downloads, tool toggles, Jev failures, mocked cloud PATCH/restore, dark mode and reduced motion. Browser tests run against a fresh libSQL file per run, including dev sign-in, publishing and executing a downloaded install script. A real GitHub OAuth app, Turso Cloud and paid-provider execution are not exercised by these tests.

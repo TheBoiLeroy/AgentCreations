@@ -1,9 +1,16 @@
 "use client";
-import { useEffect, useState } from "react";
-import { ArrowRight, Github, Plus, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, Github, Plus, Upload, Wand2, X } from "lucide-react";
 import { z } from "zod";
-import { triggerFromName } from "@agents/spec";
-import { parseSkillReference, setupItemSchema, setupSchema, type SetupItem } from "@agents/spec/setups";
+import { parseAgentSpec, triggerFromName } from "@agents/spec";
+import {
+  parseSetupImport,
+  parseSkillReference,
+  setupFromAgents,
+  setupItemSchema,
+  setupSchema,
+  type SetupItem,
+} from "@agents/spec/setups";
 import { catalog, getSkillSource } from "@agents/jev";
 import { readLibrary, type SavedAgent } from "../lib/library";
 import { Avatar, Shell, useJson, type Profile, type SetupSummary } from "./setups";
@@ -37,25 +44,128 @@ interface Draft {
 }
 const blank: Draft = { revision: 0, slug: "", title: "", description: "", items: [], published: true };
 
-function Editor({ start, onDone }: { start: Draft; onDone: (saved: boolean) => void }) {
+type Choice = { name: string; options: { repository: string; skill: string; from: string; uses: number }[] };
+/** Agents built on this device plus those saved to the database, newest first, one per command. */
+function useMyAgents() {
+  const [agents, setAgents] = useState<SavedAgent[]>([]);
+  useEffect(() => {
+    let local: SavedAgent[] = [];
+    try {
+      local = readLibrary();
+    } catch {
+      /* No readable library on this device. */
+    }
+    setAgents(local);
+    fetch("/api/agent-builds", { cache: "no-store", signal: AbortSignal.timeout(10000) })
+      .then((response) => (response.ok ? response.json() : { builds: [] }))
+      .then(({ builds }: { builds: { id: string; spec: unknown }[] }) => {
+        const saved = builds.flatMap((build) => {
+          try {
+            return build.spec ? [{ id: build.id, spec: parseAgentSpec(build.spec) }] : [];
+          } catch {
+            return [];
+          }
+        });
+        const seen = new Set<string>();
+        setAgents(
+          [...[...local].reverse(), ...saved].filter(({ spec }) => !seen.has(spec.trigger) && !!seen.add(spec.trigger)),
+        );
+      })
+      .catch(() => undefined);
+  }, []);
+  return agents;
+}
+function Editor({ start, autofill, onDone }: { start: Draft; autofill?: boolean; onDone: (saved: boolean) => void }) {
   const [draft, setDraft] = useState(start);
   const [reference, setReference] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [library, setLibrary] = useState<SavedAgent[]>([]);
-  useEffect(() => {
-    try {
-      setLibrary(readLibrary());
-    } catch {
-      /* No readable library on this device; skills can still be added. */
-    }
-  }, []);
+  const library = useMyAgents();
+  const [pasted, setPasted] = useState("");
+  const [report, setReport] = useState<{ added: number; problems: string[]; unknown: string[] } | null>(null);
+  const [choices, setChoices] = useState<Choice[]>([]);
+  const [importing, setImporting] = useState(false);
   const has = (item: SetupItem) => draft.items.some((x) => itemKey(x) === itemKey(item));
+  // The latest items, readable after an await (state updates apply later).
+  const items = useRef(draft.items);
+  items.current = draft.items;
+  /** Adds what fits and isn't there yet. Returns how many were new. */
+  const addMany = (incoming: SetupItem[]) => {
+    const keys = new Set(items.current.map(itemKey));
+    const fresh = incoming.filter((item) => !keys.has(itemKey(item)) && !!keys.add(itemKey(item)));
+    const room = fresh.slice(0, Math.max(0, 30 - items.current.length));
+    if (room.length < fresh.length) setError("A setup holds up to 30 items; the rest weren’t added.");
+    items.current = [...items.current, ...room];
+    setDraft((current) => ({ ...current, items: items.current }));
+    return room.length;
+  };
   const add = (item: SetupItem) => {
     if (has(item)) return setError("That’s already in this setup.");
     if (draft.items.length >= 30) return setError("A setup holds up to 30 items.");
     setError("");
-    setDraft({ ...draft, items: [...draft.items, item] });
+    addMany([item]);
+  };
+  const fromAgents = () => {
+    if (!library.length) return setError("No agents yet. Build one in the workshop first.");
+    setError("");
+    const proposal = setupFromAgents(library.map(({ spec }) => spec));
+    setDraft((current) => ({
+      ...current,
+      title: current.title || proposal.title,
+      description: current.description || proposal.description,
+    }));
+    addMany(proposal.items);
+  };
+  // "Start from my agents" on /me opens the editor already filled in.
+  const [filled, setFilled] = useState(false);
+  useEffect(() => {
+    if (autofill && !filled && library.length) {
+      setFilled(true);
+      fromAgents();
+    }
+  }, [autofill, filled, library]); // eslint-disable-line react-hooks/exhaustive-deps
+  const runImport = async (text: string) => {
+    if (!text.trim()) return;
+    setImporting(true);
+    setError("");
+    const parsed = parseSetupImport(text);
+    // Names of my own agents become those agents; the rest are looked up.
+    const mine = new Map(library.map(({ spec }) => [spec.trigger, spec]));
+    const agents: SetupItem[] = parsed.names.flatMap((name) => (mine.has(name) ? [{ kind: "agent" as const, spec: mine.get(name)!, note: "" }] : []));
+    const lookup = parsed.names.filter((name) => !mine.has(name));
+    const resolved: SetupItem[] = [];
+    const ambiguous: Choice[] = [];
+    const unknown: string[] = [];
+    if (lookup.length)
+      try {
+        const response = await fetch("/api/setups/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ names: lookup.filter((name) => /^[a-z0-9][a-z0-9._-]{0,99}$/.test(name)) }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!response.ok) throw new Error();
+        const { matches } = (await response.json()) as { matches: Record<string, Choice["options"]> };
+        for (const name of lookup) {
+          const options = matches[name] || [];
+          if (options.length === 1) resolved.push({ kind: "skill", repository: options[0].repository, skill: options[0].skill, note: "" });
+          else if (options.length > 1) ambiguous.push({ name, options });
+          else unknown.push(name);
+        }
+      } catch {
+        unknown.push(...lookup);
+      }
+    const added = addMany([...parsed.items, ...agents, ...resolved]);
+    setChoices(ambiguous);
+    setReport({ added, problems: parsed.problems, unknown });
+    setImporting(false);
+  };
+  const readFile = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 200000) return setError("That file is too large to import (200 KB at most).");
+    const text = await file.text();
+    setPasted(text);
+    await runImport(text);
   };
   const addReference = () => {
     const parsed = parseSkillReference(reference);
@@ -158,6 +268,75 @@ function Editor({ start, onDone }: { start: Draft; onDone: (saved: boolean) => v
         })}
       </fieldset>
       <fieldset className="details-section">
+        <legend>Bring in what you already use</legend>
+        <div className="actions">
+          <button className="button" onClick={fromAgents}>
+            <Wand2 size={14} /> Add all my agents and their skills
+          </button>
+          <span className="hint">{library.length} agent{library.length === 1 ? "" : "s"} found in the workshop.</span>
+        </div>
+        <label htmlFor="setup-import">Import your setup</label>
+        <textarea
+          id="setup-import"
+          rows={5}
+          maxLength={200000}
+          placeholder={"Paste skill links, “npx skills add …” commands, GitHub skill folders,\nan agent JSON, or the output of: ls ~/.claude/skills"}
+          value={pasted}
+          onChange={(e) => setPasted(e.target.value)}
+        />
+        <div className="actions">
+          <button className="button" disabled={!pasted.trim() || importing} onClick={() => void runImport(pasted)}>
+            {importing ? "Reading…" : "Import"}
+          </button>
+          <label className="button">
+            <Upload size={14} /> Upload a file
+            <input
+              className="sr-only"
+              type="file"
+              accept=".json,.md,.txt,application/json,text/plain,text/markdown"
+              aria-label="Upload a setup or agent file"
+              onChange={(e) => {
+                void readFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {report && (
+          <div className="hint" role="status" aria-label="Import result">
+            <p>
+              Added {report.added} item{report.added === 1 ? "" : "s"}.
+            </p>
+            {report.unknown.length > 0 && (
+              <p>
+                No public source found for: {report.unknown.join(", ")}. Paste a link for each (skills that live only on
+                your machine can’t be shared yet).
+              </p>
+            )}
+            {report.problems.map((problem) => (
+              <p key={problem}>{problem}</p>
+            ))}
+          </div>
+        )}
+        {choices.map((choice) => (
+          <div className="chips" role="group" aria-label={`Which ${choice.name}?`} key={choice.name}>
+            <span className="hint">Which “{choice.name}”?</span>
+            {choice.options.map((option) => (
+              <button
+                key={option.repository}
+                onClick={() => {
+                  add({ kind: "skill", repository: option.repository, skill: option.skill, note: "" });
+                  setChoices((list) => list.filter((c) => c.name !== choice.name));
+                }}
+              >
+                <Plus size={12} /> {option.repository}
+                {option.from === "setups" ? ` · in ${option.uses} setup${option.uses === 1 ? "" : "s"}` : ""}
+              </button>
+            ))}
+          </div>
+        ))}
+      </fieldset>
+      <fieldset className="details-section">
         <legend>Add a skill</legend>
         <label htmlFor="skill-reference">Skill link or install command</label>
         <input
@@ -235,6 +414,7 @@ export function MyPage() {
   const [version, setVersion] = useState(0);
   const { data, error } = useJson<Me>("/api/me", version);
   const [editing, setEditing] = useState<Draft | null>(null);
+  const [autofill, setAutofill] = useState(false);
   const [notice, setNotice] = useState("");
   useEffect(() => {
     setNotice(authNotices[new URLSearchParams(window.location.search).get("auth") || ""] || "");
@@ -292,6 +472,7 @@ export function MyPage() {
           <Editor
             key={editing.id || "new"}
             start={editing}
+            autofill={autofill}
             onDone={(saved) => {
               setEditing(null);
               if (saved) {
@@ -312,7 +493,22 @@ export function MyPage() {
               </div>
             </div>
             <div className="actions">
-              <button className="button primary" onClick={() => setEditing(blank)}>
+              <button
+                className="button primary"
+                onClick={() => {
+                  setAutofill(true);
+                  setEditing(blank);
+                }}
+              >
+                <Wand2 size={15} /> Start from my agents
+              </button>
+              <button
+                className="button"
+                onClick={() => {
+                  setAutofill(false);
+                  setEditing(blank);
+                }}
+              >
                 <Plus size={15} /> New setup
               </button>
               <form method="post" action="/auth/sign-out">

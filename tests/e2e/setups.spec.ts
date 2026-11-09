@@ -1,4 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { exampleAgent } from "../../packages/spec/src/index";
 
 const profile = { handle: "eliancoder", display_name: "Ian", avatar_url: null };
@@ -37,13 +41,15 @@ test("find someone's setup, copy every skill and keep their agent", async ({ pag
   await expect(page.getByRole("heading", { name: "Ian", exact: true })).toBeVisible();
   await page.getByRole("link", { name: "View setup" }).click();
   await expect(page.getByRole("heading", { name: "Daily driver" })).toBeVisible();
-  await expect(page.locator(".install-card pre")).toHaveText(
-    "npx skills add anthropics/skills --skill pdf\nnpx skills add mattpocock/skills --skill grill-me",
+  await expect(page.getByLabel("Install everything").locator("pre")).toHaveText(
+    /^curl -fsSL 'http:\/\/127\.0\.0\.1:3100\/u\/eliancoder\/daily-driver\/install\.sh' -o setup\.sh && sh setup\.sh$/,
   );
+  await expect(page.getByLabel("Install everything")).toContainText("Adds 2 skills with “npx skills add” and writes 1 agent");
+  await expect(page.locator(".setup-item code").first()).toHaveText("npx skills add anthropics/skills --skill pdf");
   await expect(page.getByText("For contracts")).toBeVisible();
   await expect(page.getByText("has not reviewed that code")).toBeVisible();
   await page.getByRole("button", { name: "Copy" }).click();
-  await expect(page.getByRole("status")).toContainText(/Copied the install script|Clipboard unavailable/);
+  await expect(page.getByRole("status")).toContainText(/Copied the install command|Clipboard unavailable/);
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download skill" }).click();
   expect((await download).suggestedFilename()).toBe("lead-sorter-skill.zip");
@@ -142,4 +148,79 @@ test("dev sign-in, publish a setup to the local database and read it back as a v
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.goto("/me");
   await expect(page.getByRole("heading", { name: "Share how you work." })).toBeVisible();
+});
+
+test("start from my agents and import a pasted setup, resolving names", async ({ page }) => {
+  await page.route("**/api/me", (route) => route.fulfill({ json: { configured: true, signIn: { github: true, dev: false }, profile, setups: [] } }));
+  await page.route("**/api/setups/resolve", (route) =>
+    route.fulfill({
+      json: {
+        matches: {
+          "grill-me": [{ repository: "mattpocock/skills", skill: "grill-me", from: "setups", uses: 3 }],
+          tdd: [
+            { repository: "mattpocock/skills", skill: "tdd", from: "setups", uses: 2 },
+            { repository: "someone/skills", skill: "tdd", from: "index", uses: 10 },
+          ],
+          "my-private-skill": [],
+        },
+      },
+    }),
+  );
+  const deck = { ...exampleAgent, name: "Deck maker", trigger: "deck-maker", slug: "deck-maker", tools: [{ id: "skill-presentations", requiresApproval: true, skillSource: { repository: "anthropics/skills", skill: "pptx" } }] };
+  await page.addInitScript((specs) => {
+    localStorage.setItem("agent-creations:library:v2", JSON.stringify(specs.map((spec, i) => ({ id: `bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbb${i}`, spec }))));
+  }, [exampleAgent, deck]);
+  await page.goto("/me");
+  await page.getByRole("button", { name: "Start from my agents" }).click();
+  await expect(page.getByLabel("Title")).toHaveValue("My setup");
+  await expect(page.getByLabel("What it’s for (optional)")).toHaveValue("2 agents and 1 skill I use.");
+  for (const name of ["Deck maker (agent)", "Lead sorter (agent)", "anthropics/skills · pptx"])
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Note for anthropics/skills · pptx")).toHaveValue("Used by Deck maker");
+  await page.getByLabel("Import your setup").fill("https://skills.sh/anthropics/skills/pdf\ngrill-me tdd my-private-skill lead-sorter\nnot a skill line!");
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  const result = page.getByLabel("Import result");
+  await expect(result).toContainText("Added 2 items.");
+  await expect(result).toContainText("No public source found for: my-private-skill.");
+  await expect(result).toContainText("Couldn’t read “not a skill line!”.");
+  await expect(page.getByText("mattpocock/skills · grill-me", { exact: true })).toBeVisible();
+  await page.getByRole("group", { name: "Which tdd?" }).getByRole("button", { name: /mattpocock\/skills · in 2 setups/ }).click();
+  await expect(page.getByText("mattpocock/skills · tdd", { exact: true })).toBeVisible();
+  await expect(page.getByRole("group", { name: "Which tdd?" })).toHaveCount(0);
+  const upload = page.waitForEvent("filechooser");
+  await page.getByText("Upload a file").click();
+  await (await upload).setFiles({ name: "agent.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ ...exampleAgent, name: "Uploaded", trigger: "uploaded", slug: "uploaded" })) });
+  await expect(page.getByText("Uploaded (agent)", { exact: true })).toBeVisible();
+});
+test("the one command installs a setup served from the local database", async ({ page, request }, info) => {
+  const handle = `installer-${info.project.name}-${Date.now().toString(36)}`;
+  await page.addInitScript((spec) => {
+    localStorage.setItem("agent-creations:library:v2", JSON.stringify([{ id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb", spec }]));
+  }, exampleAgent);
+  await page.goto("/me");
+  await page.getByLabel("Local dev sign-in (only on your machine under next dev)").fill(handle);
+  await page.getByRole("button", { name: "Sign in locally" }).click();
+  await page.getByRole("button", { name: "Start from my agents" }).click();
+  await page.getByLabel("Import your setup").fill("npx skills add mattpocock/skills --skill grill-me");
+  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.getByRole("button", { name: "Save and publish" }).click();
+  await expect(page.getByRole("status")).toContainText("Setup saved.");
+  await page.goto(`/u/${handle}/my-setup`);
+  const command = await page.getByLabel("Install everything").locator("pre").innerText();
+  const url = command.match(/'([^']+)'/)![1];
+  const script = await (await request.get(url)).text();
+  const dir = mkdtempSync(join(tmpdir(), "e2e-install-"));
+  try {
+    mkdirSync(join(dir, "bin"));
+    writeFileSync(join(dir, "bin", "npx"), `#!/bin/sh\necho "$@" >> "${dir}/npx.log"\n`);
+    chmodSync(join(dir, "bin", "npx"), 0o755);
+    writeFileSync(join(dir, "setup.sh"), script);
+    const run = spawnSync("/bin/sh", ["setup.sh"], { cwd: dir, env: { HOME: dir, PATH: `${dir}/bin:/usr/bin:/bin` }, encoding: "utf8" });
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toContain("Done: 2 installed, 0 skipped.");
+    expect(readFileSync(join(dir, "npx.log"), "utf8")).toBe("skills add mattpocock/skills --skill grill-me\n");
+    expect(readFileSync(join(dir, ".claude/skills/lead-sorter/SKILL.md"), "utf8")).toContain("name: lead-sorter");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

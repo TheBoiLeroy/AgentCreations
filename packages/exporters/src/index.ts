@@ -30,6 +30,7 @@ import {
 } from "./registry";
 export * from "./registry";
 export * from "./check";
+export * from "./setup-install";
 import { checkExport } from "./check";
 export type Files = Record<string, string>;
 export const tools = [
