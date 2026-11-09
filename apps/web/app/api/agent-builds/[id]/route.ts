@@ -1,26 +1,16 @@
-import { z } from "zod";
 import {
-  ApiError,
   apiError,
   assertSameOrigin,
-  database,
+  myBuild,
   readBody,
   saveBuild,
 } from "../../../../lib/server/builds";
 type Context = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, context: Context) {
   try {
-    const { id } = await context.params;
-    z.string().uuid().parse(id);
-    const client = await database();
-    const { data, error } = await client
-      .from("agent_builds")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
-    if (error || !data)
-      throw new ApiError(404, "Build not found in this session.");
-    return Response.json(data);
+    return Response.json(await myBuild((await context.params).id), {
+      headers: { "Cache-Control": "no-store" },
+    });
   } catch (error) {
     return apiError(error);
   }

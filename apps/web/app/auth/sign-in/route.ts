@@ -1,26 +1,18 @@
-import { cloudConfigured, serverClient } from "../../../lib/server/builds";
-// Starts GitHub sign-in. An anonymous builder session is upgraded in place so its cloud
-// drafts stay with the account; `fresh=1` skips that when GitHub is already linked elsewhere.
+import { randomBytes } from "node:crypto";
+import { cookies } from "next/headers";
+import { authorizeUrl, githubConfigured, siteOrigin } from "../../../lib/server/github";
+const STATE_COOKIE = "ac_oauth_state";
+// Starts GitHub sign-in. The state cookie ties the callback to this browser.
 export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const fail = (reason: string) => Response.redirect(new URL(`/me?auth=${reason}`, url.origin), 303);
-  if (!cloudConfigured()) return fail("unavailable");
-  try {
-    const client = await serverClient();
-    const {
-      data: { user },
-    } = await client.auth.getUser();
-    const oauth = {
-      provider: "github" as const,
-      options: { redirectTo: `${url.origin}/auth/callback` },
-    };
-    const { data, error } =
-      user?.is_anonymous && !url.searchParams.has("fresh")
-        ? await client.auth.linkIdentity(oauth)
-        : await client.auth.signInWithOAuth(oauth);
-    if (error || !data.url) return fail("failed");
-    return Response.redirect(data.url, 303);
-  } catch {
-    return fail("failed");
-  }
+  const origin = siteOrigin(request);
+  if (!githubConfigured()) return Response.redirect(new URL("/me?auth=unavailable", origin), 303);
+  const state = randomBytes(24).toString("base64url");
+  (await cookies()).set(STATE_COOKIE, state, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/auth/callback",
+    maxAge: 600,
+  });
+  return Response.redirect(authorizeUrl(origin, state), 303);
 }

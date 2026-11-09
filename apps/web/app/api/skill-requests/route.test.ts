@@ -1,33 +1,24 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const insert = vi.hoisted(() => vi.fn());
-vi.mock("../../../lib/server/builds", async () => {
-  const { z } = await import("zod");
-  class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }
-  return {
-    ApiError,
-    assertSameOrigin: (request: Request) => { if (request.headers.get("origin") !== "https://builder.test") throw new ApiError(403, "Forbidden"); },
-    readBody: (request: Request) => request.json(),
-    database: async () => ({ from: () => ({ insert }) }),
-    apiError: (error: unknown) => Response.json({ error: "Failed" }, { status: error instanceof ApiError ? error.status : error instanceof z.ZodError ? 400 : 500 }),
-  };
-});
+vi.mock("server-only", () => ({}));
+vi.mock("next/headers", async () => ({ cookies: async () => (await import("../../../lib/server/test-support")).cookieStore }));
+import type { Client } from "@libsql/client";
 import { POST } from "./route";
-const request = (body: unknown, origin = "https://builder.test") => new Request("https://builder.test/api/skill-requests", { method: "POST", headers: { origin, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-beforeEach(() => { insert.mockReset(); insert.mockResolvedValue({ error: null }); });
-it("normalizes the term and never accepts a caller-supplied owner", async () => {
-  expect((await POST(request({ term: " Calendar Sync " }))).status).toBe(200);
-  expect(insert).toHaveBeenCalledWith({ search_term: "calendar sync" });
-  expect((await POST(request({ term: "test", user_id: "another-owner" }))).status).toBe(400);
+import { freshDatabase, post } from "../../../lib/server/test-support";
+
+let db: Client;
+beforeEach(async () => {
+  db = await freshDatabase();
 });
-it("treats duplicate votes as success and other failures honestly", async () => {
-  insert.mockResolvedValueOnce({ error: { code: "23505" } });
-  expect((await POST(request({ term: "calendar" }))).status).toBe(200);
-  insert.mockResolvedValueOnce({ error: { code: "missing-table" } });
-  expect((await POST(request({ term: "calendar" }))).status).toBe(503);
+const send = (body: unknown, origin = "http://localhost") => POST(post("/api/skill-requests", body, { headers: { Origin: origin } }));
+it("normalizes the term, counts one vote per browser and never accepts a caller-supplied owner", async () => {
+  expect((await send({ term: " Calendar Sync " })).status).toBe(200);
+  expect((await send({ term: "calendar sync" })).status).toBe(200);
+  expect((await db.execute("select search_term from skill_requests")).rows.map((r) => r.search_term)).toEqual(["calendar sync"]);
+  expect((await send({ term: "test", user_id: "another-owner" })).status).toBe(400);
 });
 it("rejects blank, oversized and cross-origin requests", async () => {
-  expect((await POST(request({ term: " " }))).status).toBe(400);
-  expect((await POST(request({ term: "x".repeat(201) }))).status).toBe(400);
-  expect((await POST(request({ term: "calendar" }, "https://other.test"))).status).toBe(403);
-  expect(insert).not.toHaveBeenCalled();
+  expect((await send({ term: " " })).status).toBe(400);
+  expect((await send({ term: "x".repeat(201) })).status).toBe(400);
+  expect((await send({ term: "calendar" }, "https://other.test")).status).toBe(403);
+  expect((await db.execute("select count(*) as n from skill_requests")).rows[0].n).toBe(0);
 });

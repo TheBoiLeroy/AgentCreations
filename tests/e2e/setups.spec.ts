@@ -61,15 +61,15 @@ test("unreadable or missing setups say so instead of rendering stored content", 
   await expect(page.locator("p.error")).toContainText("can't read");
   await expect(page.locator(".install-card")).toHaveCount(0);
   await page.unroute("**/api/setups**");
-  await page.goto("/explore");
-  await expect(page.locator("p.error")).toContainText("not configured");
+  await page.goto("/u/nobody-here/missing");
+  await expect(page.locator("p.error")).toContainText("No profile with that name");
 });
 test("signed-out visitors are told what publishing needs", async ({ page }) => {
   await page.goto("/me?auth=unavailable");
   await expect(page.getByRole("heading", { name: "Share how you work." })).toBeVisible();
-  await expect(page.getByText("Profiles need cloud storage")).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Sign-in isn’t available");
-  await page.route("**/api/me", (route) => route.fulfill({ json: { configured: true, profile: null, setups: [] } }));
+  await expect(page.getByText("GitHub sign-in isn’t set up on this site yet: add")).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("GitHub sign-in isn’t set up on this site yet");
+  await page.route("**/api/me", (route) => route.fulfill({ json: { configured: true, signIn: { github: true, dev: false }, profile: null, setups: [] } }));
   await page.goto("/me");
   await expect(page.getByRole("link", { name: "Sign in with GitHub" })).toHaveAttribute("href", "/auth/sign-in");
 });
@@ -114,4 +114,32 @@ test("package skills and a built agent into a setup and publish it", async ({ pa
   });
   await expect(page.getByRole("heading", { name: "Daily driver" })).toBeVisible();
   await expect(page.getByText("Published", { exact: true })).toBeVisible();
+});
+
+// No mocks: the dev server's own local Turso database, cookies and sign-in.
+test("dev sign-in, publish a setup to the local database and read it back as a visitor", async ({ page, browser }, info) => {
+  const handle = `tester-${info.project.name}-${Date.now().toString(36)}`;
+  await page.goto("/me");
+  await page.getByLabel("Local dev sign-in (only on your machine under next dev)").fill(handle);
+  await page.getByRole("button", { name: "Sign in locally" }).click();
+  await expect(page.getByRole("link", { name: `agentcreations/u/${handle}` })).toBeVisible();
+  await page.getByRole("button", { name: "New setup" }).click();
+  await page.getByLabel("Title").fill("Stored for real");
+  await page.getByLabel("Skill link or install command").fill("https://skills.sh/anthropics/skills/pdf");
+  await page.getByRole("button", { name: "Add skill" }).click();
+  await page.getByRole("button", { name: "Save and publish" }).click();
+  await expect(page.getByRole("status")).toContainText("Setup saved.");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Stored for real" })).toBeVisible();
+  // A different browser, signed out, sees the published setup.
+  const visitor = await browser.newPage();
+  await visitor.goto(`/u/${handle}/stored-for-real`);
+  await expect(visitor.getByRole("heading", { name: "Stored for real" })).toBeVisible();
+  await expect(visitor.locator(".setup-item code").first()).toHaveText("npx skills add anthropics/skills --skill pdf");
+  await visitor.goto("/me");
+  await expect(visitor.getByRole("heading", { name: "Share how you work." })).toBeVisible();
+  await visitor.close();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.goto("/me");
+  await expect(page.getByRole("heading", { name: "Share how you work." })).toBeVisible();
 });

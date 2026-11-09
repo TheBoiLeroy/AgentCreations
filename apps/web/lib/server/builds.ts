@@ -1,9 +1,10 @@
 import "server-only";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import { z } from "zod";
-import { draftSchema, triggerFromName } from "@agents/spec";
+import { draftSchema, parseAgentSpec, triggerFromName } from "@agents/spec";
 import { createAgentSpec, validateDraftCatalog } from "@agents/jev";
+import { currentUser, ensureUser } from "./auth";
+import { database } from "./store/db";
+import { getBuild, listBuilds, saveBuild as store, StoreConflict } from "./store/builds";
 
 export class ApiError extends Error {
   constructor(
@@ -13,54 +14,24 @@ export class ApiError extends Error {
     super(message);
   }
 }
-export const cloudConfigured = () =>
-  !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
-/** Cookie-backed Supabase client. Callers check `cloudConfigured()` first. */
-export async function serverClient() {
-  const jar = await cookies();
-  return createServerClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => jar.getAll(),
-        setAll: (entries) =>
-          entries.forEach(({ name, value, options }) =>
-            jar.set(name, value, {
-              ...options,
-              httpOnly: true,
-              sameSite: "lax",
-              secure: process.env.NODE_ENV === "production",
-            }),
-          ),
-      },
-    },
-  );
+/** Storage is always available: a local Turso file by default, Turso Cloud when configured. */
+export const cloudConfigured = () => true;
+export async function signedIn() {
+  const user = await currentUser();
+  if (!user)
+    throw new ApiError(401, "This browser session has expired. Your local draft is still available.");
+  return user;
 }
-export async function database(createSession = false) {
-  if (!cloudConfigured())
-    throw new ApiError(
-      503,
-      "Cloud drafts are not configured. Your draft is saved on this device.",
-    );
-  const client = await serverClient();
-  const {
-    data: { user },
-  } = await client.auth.getUser();
-  if (!user) {
-    if (!createSession)
-      throw new ApiError(
-        401,
-        "This browser session has expired. Your local draft is still available.",
-      );
-    const { error } = await client.auth.signInAnonymously();
-    if (error)
-      throw new ApiError(
-        503,
-        "Cloud sign-in failed. Enable anonymous sign-ins in Supabase.",
-      );
-  }
-  return client;
+export async function myBuilds() {
+  const user = await currentUser();
+  return user ? listBuilds(await database(), user.id) : [];
+}
+export async function myBuild(id: string) {
+  z.string().uuid().parse(id);
+  const user = await signedIn();
+  const row = await getBuild(await database(), user.id, id);
+  if (!row) throw new ApiError(404, "Build not found in this session.");
+  return row;
 }
 export const saveSchema = z
   .object({
@@ -78,32 +49,24 @@ export async function saveBuild(id: string, body: unknown, create = false) {
     throw new ApiError(400, "Create the build before patching it.");
   validateDraftCatalog(draft);
   const base = draft.name.trim() ? triggerFromName(draft.name) : null;
-  const spec = complete ? createAgentSpec(draft, base!) : null;
   if (complete && draft.step !== "install")
     throw new ApiError(400, "Review the agent before creating it.");
-  const client = await database(create);
-  const { data, error } = await client.rpc("save_agent_build", {
-    p_id: id,
-    p_draft: draft,
-    p_base: base,
-    p_expected_revision: revision,
-    p_spec: spec,
-  });
-  if (error) {
-    if (error.code === "40001" || error.code === "23505")
-      throw new ApiError(
-        409,
-        "This build changed in another tab. Reload the cloud version before saving.",
-      );
-    throw new ApiError(
-      503,
-      "Cloud save failed. Check the agent_builds migration and permissions.",
-    );
+  const spec = complete ? createAgentSpec(draft, base!) : null;
+  const user = create ? await ensureUser() : await signedIn();
+  try {
+    const row = await store(await database(), user.id, {
+      id,
+      draft,
+      base,
+      expectedRevision: revision,
+      spec: spec as Record<string, unknown> | null,
+    });
+    return { ...row, spec: row.spec ? parseAgentSpec(row.spec) : null };
+  } catch (error) {
+    if (error instanceof StoreConflict)
+      throw new ApiError(409, "This build changed in another tab. Reload the cloud version before saving.");
+    throw error;
   }
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row || row.id !== id || typeof row.revision !== "number")
-    throw new ApiError(503, "Cloud returned an invalid save response.");
-  return row;
 }
 export function assertSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
@@ -152,6 +115,8 @@ export async function readBody(request: Request) {
 export function apiError(error: unknown) {
   if (error instanceof ApiError)
     return Response.json({ error: error.message }, { status: error.status });
+  if (error instanceof StoreConflict)
+    return Response.json({ error: error.message }, { status: 409 });
   if (error instanceof z.ZodError)
     return Response.json(
       {
@@ -160,8 +125,10 @@ export function apiError(error: unknown) {
       },
       { status: 400 },
     );
+  // Unexpected failures are logged for the operator and never echoed to the browser.
+  console.error(error);
   return Response.json(
     { error: "Request could not be completed." },
-    { status: 400 },
+    { status: 500 },
   );
 }

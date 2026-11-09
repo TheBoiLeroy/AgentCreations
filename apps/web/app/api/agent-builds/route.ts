@@ -2,24 +2,17 @@ import { z } from "zod";
 import {
   apiError,
   assertSameOrigin,
-  cloudConfigured,
-  database,
+  myBuilds,
   readBody,
   saveBuild,
   saveSchema,
 } from "../../../lib/server/builds";
 export async function GET() {
-  if (!cloudConfigured())
-    return Response.json({ configured: false, builds: [] });
   try {
-    const client = await database();
-    const { data, error } = await client
-      .from("agent_builds")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(100);
-    if (error) throw error;
-    return Response.json({ configured: true, builds: data });
+    return Response.json(
+      { configured: true, builds: await myBuilds() },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return apiError(error);
   }

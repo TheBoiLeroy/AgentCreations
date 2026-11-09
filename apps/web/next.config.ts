@@ -4,6 +4,8 @@ const config: NextConfig = {
   // Keep browser-test artifacts separate from a running dev server and builds.
   distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: path.resolve(process.cwd(), "../.."),
+  // libSQL ships a native driver; load it from node_modules instead of bundling it.
+  serverExternalPackages: ["@libsql/client", "libsql"],
   transpilePackages: [
     "@agents/spec",
     "@agents/exporters",

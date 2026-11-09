@@ -130,7 +130,7 @@ export function useBuild() {
             agent: latest.current.draft === current.draft ? saved.agent : null,
           });
           if (latest.current.id === saved.id)
-            setStorage("Saved to cloud · local recovery copy kept");
+            setStorage("Saved to the database · local recovery copy kept");
         } catch (error) {
           blocked.current = true;
           setCloud("blocked");

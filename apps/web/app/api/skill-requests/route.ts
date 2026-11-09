@@ -1,12 +1,14 @@
 import { z } from "zod";
-import { apiError, ApiError, assertSameOrigin, database, readBody } from "../../../lib/server/builds";
+import { apiError, assertSameOrigin, readBody } from "../../../lib/server/builds";
+import { ensureUser } from "../../../lib/server/auth";
+import { database } from "../../../lib/server/store/db";
+import { addSkillRequest } from "../../../lib/server/store/builds";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
     const body = z.object({ term: z.string().trim().min(1).max(200) }).strict().parse(await readBody(request));
-    const client = await database(true);
-    const { error } = await client.from("skill_requests").insert({ search_term: body.term.toLowerCase() });
-    if (error && error.code !== "23505") throw new ApiError(503, "Could not save your request. Check the skill_requests migration.");
+    const user = await ensureUser();
+    await addSkillRequest(await database(), user.id, body.term.toLowerCase());
     return Response.json({ saved: true });
   } catch (error) {
     return apiError(error);

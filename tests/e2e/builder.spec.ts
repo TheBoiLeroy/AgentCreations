@@ -385,7 +385,7 @@ test("cloud drafts are patched but do not automatically resume after refresh", a
   await page
     .getByLabel("Anything else Jev should know?")
     .fill("Write quotes from customer notes");
-  await expect(page.locator(".save-status")).toContainText("Saved to cloud");
+  await expect(page.locator(".save-status")).toContainText("Saved to the database");
   await expect.poll(() => patches).toBeGreaterThan(0);
   await expect
     .poll(() => (row?.draft as { context?: string })?.context)
@@ -395,7 +395,7 @@ test("cloud drafts are patched but do not automatically resume after refresh", a
   );
   await page.reload();
   await expect(page.locator(".category-art svg")).toHaveCount(5);
-  await expect(page.locator(".save-status")).toContainText("Saved to cloud");
+  await expect(page.locator(".save-status")).toContainText("Saved to the database");
   await expect(page.locator(".category-art svg")).toHaveCount(5);
 });
 test("live agents become Pi extensions with data sources and a toggle command", async ({

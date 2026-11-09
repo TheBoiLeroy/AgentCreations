@@ -1,109 +1,70 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({
-  authorize: vi.fn(),
-  rpc: vi.fn(),
-  from: vi.fn(),
-  fetchPage: vi.fn(),
-}));
-vi.mock("../../../../lib/server/catalog", async (original) => ({
-  ...(await original<typeof import("../../../../lib/server/catalog")>()),
-  maintainerDatabase: mocks.authorize,
-}));
+vi.mock("next/headers", async () => ({ cookies: async () => (await import("../../../../lib/server/test-support")).cookieStore }));
+const fetchPage = vi.hoisted(() => vi.fn());
 vi.mock("../../../../lib/skill-catalog", async (original) => ({
   ...(await original<typeof import("../../../../lib/skill-catalog")>()),
-  fetchCatalogPage: mocks.fetchPage,
+  fetchCatalogPage: fetchPage,
 }));
-import { POST } from "./route";
-import { ApiError } from "../../../../lib/server/builds";
+import type { Client } from "@libsql/client";
+import { GET, POST } from "./route";
 import { CatalogSourceError } from "../../../../lib/skill-catalog";
-const id = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-function request(body: unknown, origin?: string) {
-  return new Request("http://localhost/api/catalog/manage", {
-    method: "POST",
-    body: JSON.stringify(body),
-    headers: origin ? { origin } : {},
-  });
+import { freshDatabase, jar, post } from "../../../../lib/server/test-support";
+import { createSession, createUser } from "../../../../lib/server/store/users";
+
+let db: Client;
+const send = (body: unknown, origin?: string) => POST(post("/api/catalog/manage", body, origin ? { headers: { origin } } : {}));
+async function as(kind: "github" | "anonymous", maintainer: boolean) {
+  const user = await createUser(db, kind, kind === "github" ? Math.floor(Math.random() * 1e6) + 1 : null);
+  if (maintainer) await db.execute({ sql: "insert into catalog_maintainers values (?)", args: [user.id] });
+  jar.set("ac_session", (await createSession(db, user.id)).token);
 }
-beforeEach(() => {
+const entry = { id: "owner/repo/one", slug: "one", source: "owner/repo", name: "one", installs: 1, sourceType: "github", installUrl: null, url: "https://skills.sh/owner/repo/one" };
+beforeEach(async () => {
   vi.resetAllMocks();
   vi.stubEnv("VERCEL_OIDC_TOKEN", "test-oidc");
-  mocks.authorize.mockResolvedValue({ rpc: mocks.rpc, from: mocks.from });
-  mocks.rpc.mockResolvedValue({ data: { id }, error: null });
-  mocks.from.mockReturnValue({
-    select: () => ({
-      eq: () => ({
-        maybeSingle: async () => ({
-          data: { id, status: "staging", next_page: 0 },
-          error: null,
-        }),
-      }),
-    }),
-  });
+  db = await freshDatabase();
 });
-afterEach(() => vi.unstubAllEnvs());
-describe("catalog management API", () => {
-  it("rejects non-maintainers before contacting the source or writing", async () => {
-    mocks.authorize.mockRejectedValue(new ApiError(403, "Maintainer required"));
-    expect((await POST(request({ action: "start" }))).status).toBe(403);
-    expect(mocks.rpc).not.toHaveBeenCalled();
-    expect(mocks.fetchPage).not.toHaveBeenCalled();
+describe("catalog management", () => {
+  it("requires a non-anonymous maintainer and same-origin writes", async () => {
+    expect((await send({ action: "start" })).status).toBe(401);
+    await as("anonymous", true);
+    expect((await send({ action: "start" })).status).toBe(401);
+    await as("github", false);
+    expect((await send({ action: "start" })).status).toBe(403);
+    expect((await GET()).status).toBe(403);
+    await as("github", true);
+    expect((await send({ action: "start" }, "https://evil.example")).status).toBe(403);
   });
-  it("rejects cross-origin writes before authentication", async () => {
-    expect(
-      (await POST(request({ action: "start" }, "https://evil.example"))).status,
-    ).toBe(403);
-    expect(mocks.authorize).not.toHaveBeenCalled();
+  it("starts, stages and publishes, reading the source token from the server only", async () => {
+    await as("github", true);
+    const start = await send({ action: "start" });
+    expect(start.status).toBe(201);
+    const { run } = await start.json();
+    fetchPage.mockResolvedValue({ data: [entry], pagination: { page: 0, perPage: 500, total: 1, hasMore: false } });
+    const advanced = await send({ action: "advance", runId: run.id });
+    expect(await advanced.json()).toMatchObject({ run: { status: "published", expected_total: 1 } });
+    expect(fetchPage).toHaveBeenCalledWith(0, "test-oidc");
+    expect((await send({ action: "advance", runId: run.id })).status).toBe(409);
+    expect((await (await GET()).json()).runs).toHaveLength(1);
   });
-  it("reports missing source authentication without creating a sync", async () => {
+  it("passes rate limits through and leaves the run untouched on source errors", async () => {
+    await as("github", true);
+    const { run } = await (await send({ action: "start" })).json();
+    fetchPage.mockRejectedValueOnce(new CatalogSourceError(429, 30));
+    const limited = await send({ action: "advance", runId: run.id });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("Retry-After")).toBe("30");
+    fetchPage.mockRejectedValueOnce(new Error("bad"));
+    expect((await send({ action: "advance", runId: run.id })).status).toBe(503);
+    expect((await db.execute("select next_page from catalog_runs")).rows[0].next_page).toBe(0);
+  });
+  it("needs the source token for syncs but not for curation", async () => {
     vi.stubEnv("VERCEL_OIDC_TOKEN", "");
-    expect((await POST(request({ action: "start" }))).status).toBe(503);
-    expect(mocks.rpc).not.toHaveBeenCalled();
-  });
-  it("does not stage or publish when source validation fails", async () => {
-    mocks.fetchPage.mockRejectedValue(new Error("private upstream error"));
-    const response = await POST(request({ action: "advance", runId: id }));
-    expect(response.status).toBe(503);
-    expect(await response.text()).not.toContain("private upstream error");
-    expect(mocks.rpc).not.toHaveBeenCalled();
-  });
-  it("propagates retry guidance and leaves the page resumable", async () => {
-    mocks.fetchPage.mockRejectedValue(new CatalogSourceError(429, 90));
-    const response = await POST(request({ action: "advance", runId: id }));
-    expect(response.status).toBe(429);
-    expect(response.headers.get("retry-after")).toBe("90");
-    expect(mocks.rpc).not.toHaveBeenCalled();
-  });
-  it("stages only validated pages using the stored page number", async () => {
-    mocks.fetchPage.mockResolvedValue({
-      data: [],
-      pagination: { total: 1, hasMore: false },
-    });
-    expect((await POST(request({ action: "advance", runId: id }))).status).toBe(
-      200,
-    );
-    expect(mocks.fetchPage).toHaveBeenCalledWith(0, "test-oidc");
-    expect(mocks.rpc).toHaveBeenCalledWith(
-      "stage_catalog_page",
-      expect.objectContaining({ p_run: id, p_page: 0 }),
-    );
-  });
-  it("allows curation without an upstream token and rejects stale revisions", async () => {
-    vi.stubEnv("VERCEL_OIDC_TOKEN", "");
-    mocks.rpc.mockResolvedValue({ data: null, error: { code: "40001" } });
-    const response = await POST(
-      request({
-        action: "curate",
-        change: {
-          target: "anthropics/skills/pdf",
-          decision: "flagged",
-          reason: "Review needed",
-          requirements: {},
-          revision: 1,
-        },
-      }),
-    );
-    expect(response.status).toBe(409);
-    expect(mocks.fetchPage).not.toHaveBeenCalled();
+    await as("github", true);
+    expect((await send({ action: "start" })).status).toBe(503);
+    const change = { target: "anthropics/skills/pdf", decision: "flagged", reason: "Review", requirements: {}, revision: 0 };
+    expect(await (await send({ action: "curate", change })).json()).toMatchObject({ override: { revision: 1 } });
+    expect((await send({ action: "curate", change })).status).toBe(409);
   });
 });

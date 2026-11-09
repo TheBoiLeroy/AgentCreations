@@ -1498,3 +1498,14 @@ footer > span:last-child {
   width: auto;
   margin: 0;
 }
+.dev-sign-in {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 420px);
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+.dev-sign-in input {
+  flex: 1 1 180px;
+  margin: 0;
+}

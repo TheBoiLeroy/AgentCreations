@@ -9,10 +9,10 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "mcp": "tsx apps/mcp-server/src/index.ts",
-    "templates": "tsx packages/pi-runner/scripts/embed.ts"
+    "templates": "tsx packages/pi-runner/scripts/embed.ts",
+    "db": "tsx scripts/db.mts"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.10",
     "@playwright/test": "^1.56.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",

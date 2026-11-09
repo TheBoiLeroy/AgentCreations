@@ -8,11 +8,17 @@ import { catalog, getSkillSource } from "@agents/jev";
 import { readLibrary, type SavedAgent } from "../lib/library";
 import { Avatar, Shell, useJson, type Profile, type SetupSummary } from "./setups";
 
-type Me = { configured: boolean; profile: Profile | null; setups: SetupSummary[] };
+type Me = {
+  configured: boolean;
+  signIn?: { github: boolean; dev: boolean };
+  profile: Profile | null;
+  setups: SetupSummary[];
+};
 const authNotices: Record<string, string> = {
   failed: "GitHub sign-in didn’t finish. Try again.",
-  unavailable: "Sign-in isn’t available: this site has no cloud storage configured.",
-  profile: "You’re signed in, but your profile couldn’t be created. Check the profiles_setups migration.",
+  unavailable: "GitHub sign-in isn’t set up on this site yet. Add GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET (see the README).",
+  handle: "That profile name already belongs to another account.",
+  "dev-handle": "Use letters, numbers and single hyphens, up to 39 characters.",
 };
 const itemKey = (item: SetupItem) =>
   item.kind === "skill" ? `skill:${item.repository}/${item.skill}`.toLowerCase() : `agent:${item.spec.trigger}`;
@@ -261,14 +267,23 @@ export function MyPage() {
         <div className="empty">
           <h2>Share how you work.</h2>
           <p className="hint">
-            {data.configured
+            {data.signIn?.github
               ? "Sign in with GitHub to publish your setup. Your GitHub username becomes your profile address."
-              : "Profiles need cloud storage, which is not configured on this site. See the README to set up Supabase and GitHub sign-in."}
+              : "GitHub sign-in isn’t set up on this site yet: add a GitHub OAuth app’s client ID and secret (see the README)."}
           </p>
-          {data.configured && (
+          {data.signIn?.github && (
             <a className="button primary" href="/auth/sign-in">
               <Github size={15} /> Sign in with GitHub
             </a>
+          )}
+          {data.signIn?.dev && (
+            <form method="post" action="/auth/dev-sign-in" className="dev-sign-in">
+              <label htmlFor="dev-handle">Local dev sign-in (only on your machine under next dev)</label>
+              <span className="describe-actions">
+                <input id="dev-handle" name="handle" required maxLength={39} placeholder="your-github-name" autoComplete="off" />
+                <button className="button">Sign in locally</button>
+              </span>
+            </form>
           )}
         </div>
       )}
