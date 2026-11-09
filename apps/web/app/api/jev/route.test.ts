@@ -48,6 +48,19 @@ describe("server-only Jev API", () => {
     expect(body.draft).toMatchObject({ step: "review", category: "information-analysis" });
     expect((await post("short")).status).toBe(400);
   });
+  it("accepts the page's own origin even when the server reports another host name", async () => {
+    const send = (origin: string) =>
+      POST(
+        new Request("http://localhost:3000/api/jev", {
+          method: "POST",
+          headers: { Origin: origin, Host: "127.0.0.1:3000" },
+          body: JSON.stringify(input),
+        }),
+      );
+    expect((await send("http://127.0.0.1:3000")).status).toBe(200);
+    for (const origin of ["http://localhost:3000", "https://evil.example", "null"])
+      expect((await send(origin)).status).toBe(403);
+  });
   it("rejects cross-origin writes", async () => {
     expect(
       (

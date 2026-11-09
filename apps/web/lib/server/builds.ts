@@ -107,7 +107,17 @@ export async function saveBuild(id: string, body: unknown, create = false) {
 }
 export function assertSameOrigin(request: Request) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin)
+  if (!origin) return;
+  // Compare with the host the browser addressed. `request.url` can name a different
+  // host than the page (Next dev reports localhost when serving 127.0.0.1).
+  const host = request.headers.get("host") || new URL(request.url).host;
+  let sent = "";
+  try {
+    sent = new URL(origin).host;
+  } catch {
+    /* "null" and malformed origins are rejected below. */
+  }
+  if (sent !== host)
     throw new ApiError(403, "Cross-origin writes are not allowed.");
 }
 export async function readBody(request: Request) {
