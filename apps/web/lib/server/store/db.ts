@@ -17,7 +17,11 @@ function repoRoot() {
 }
 /** Local Turso storage by default; TURSO_DATABASE_URL points at a Turso Cloud database instead. */
 export function databaseUrl() {
-  return process.env.TURSO_DATABASE_URL || `file:${join(repoRoot(), ".data", "agent-creations.db")}`;
+  if (process.env.TURSO_DATABASE_URL) return process.env.TURSO_DATABASE_URL;
+  // Serverless file systems are read-only or wiped between requests: a local file would lose data.
+  if (process.env.VERCEL)
+    throw new Error("TURSO_DATABASE_URL is not set. Connect a Turso database to this Vercel project.");
+  return `file:${join(repoRoot(), ".data", "agent-creations.db")}`;
 }
 export async function migrate(db: Client) {
   await db.execute(

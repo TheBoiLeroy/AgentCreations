@@ -42,3 +42,24 @@ describe("0002 setups rebuild", () => {
     db.close();
   });
 });
+describe("database location", () => {
+  it("never falls back to a local file on Vercel", async () => {
+    const { databaseUrl } = await import("./db");
+    const saved = { url: process.env.TURSO_DATABASE_URL, vercel: process.env.VERCEL };
+    try {
+      delete process.env.TURSO_DATABASE_URL;
+      process.env.VERCEL = "1";
+      expect(() => databaseUrl()).toThrow("TURSO_DATABASE_URL is not set");
+      process.env.TURSO_DATABASE_URL = "libsql://db-org.turso.io";
+      expect(databaseUrl()).toBe("libsql://db-org.turso.io");
+      delete process.env.VERCEL;
+      delete process.env.TURSO_DATABASE_URL;
+      expect(databaseUrl()).toMatch(/^file:.*\.data\/agent-creations\.db$/);
+    } finally {
+      if (saved.url === undefined) delete process.env.TURSO_DATABASE_URL;
+      else process.env.TURSO_DATABASE_URL = saved.url;
+      if (saved.vercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = saved.vercel;
+    }
+  });
+});
