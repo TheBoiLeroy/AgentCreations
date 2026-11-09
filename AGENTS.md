@@ -20,7 +20,7 @@
 
 - Add tools in `packages/jev/src/catalog.ts`: stable id, human label, description, whole-word/phrase keywords, connection requirement and authoritative `requiresApproval`. Add chips/defaults where relevant and tests for false-positive partial words.
 - Rules always run. Explicit chip recommendations survive model merging. Optional model output is catalog-id-only, validated and bounded to eight seconds; errors/timeouts fall back to rules. Keep model keys and calls inside `POST /api/jev` (a `{ description }` body asks for a whole draft).
-- Approval flags come from the catalog, never the LLM or recommendation reasons. Selecting a tool describes a requirement; it does not provision an integration or grant runtime permissions.
+- Approval flags come from the catalog, never the LLM or recommendation reasons. One fixed exception in `createAgentSpec`: `send-email` needs no approval when the user confirmed the recipient is themself, and it can then only reach the per-user recipient setting. Selecting a tool describes a requirement; it does not provision an integration or grant runtime permissions.
 
 ## Existing adapters and safety
 
@@ -30,6 +30,15 @@
 - The Pi worker is read-only, not an OS sandbox. Preserve cancellation, output bounds, timeouts and shutdown cleanup. The extension template must clear timers, widget, status and heartbeat files on `session_shutdown`.
 - Builder fields, drafts and exports are not secret storage. Keep credentials in server environment variables. Report local-only storage, cloud failures, OAuth requirements and unpublished packages honestly.
 - Before declaring changes verified, run `corepack pnpm typecheck`, `corepack pnpm test`, `corepack pnpm test:e2e`, and `corepack pnpm build`. Browser cloud tests mock transport; PGlite tests execute RLS/uniqueness SQL. Report live Supabase/provider verification separately.
+
+## Requirements and export checks
+
+- A request is first turned into typed requirements (`packages/jev/src/requirements.ts`: rules, plus an optional validated model list). A "stated" requirement must quote the request; anything else is "assumed". The user confirms the list on the review page before an agent can be created.
+- `createAgentSpec` maps every requirement to a place in the spec and records it in `coveredBy`. `requirementProblems` (part of `specProblems`) re-checks each one against the spec itself, so an uncovered or contradicted requirement stops the export. Never drop one quietly: add the generation and the check together when adding a requirement type.
+- Descriptions are composed by `describeAgent` as "<What it does>. Use when <situations>." Never interpolate the request or a draft field into that sentence.
+- Personal answers (question type `email`) become `settings` each person fills in. Their values stay in the draft and must never reach a spec or an exported file; `scrub` removes addresses typed into the description.
+- `checkExport` (`packages/exporters/src/check.ts`) runs inside every exporter on the generated files: duplicate headings, frontmatter, description shape, configured inputs called optional, email addresses, requirement coverage. Extend it when a template bug is found, with a fixture in `packages/jev/src/fixtures.test.ts`.
+- `POST /api/jev` with `{ verify: spec }` is the model completeness check. It returns one verdict per requirement id or `unavailable`; it never reports a pass it did not make.
 
 ## Profiles and setups
 

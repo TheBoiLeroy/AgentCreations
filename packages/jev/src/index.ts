@@ -591,6 +591,8 @@ export function createAgentSpec(draft: BuildDraft, trigger: string): AgentSpec {
     return `method.${replace >= 0 ? replace : method.length - 1}`;
   };
   if (worker) {
+    // The send step goes last, after the piece is written to length.
+    if (emailed && at(/^Write the email:/) >= 0) method.splice(at(/^Write the email:/), 1);
     if (scheduled && at(/the last 7 days/) >= 0)
       method[at(/the last 7 days/)] = method[at(/the last 7 days/)].replace("the last 7 days", lookback[cadence.value]);
     if (length) {
@@ -607,10 +609,7 @@ export function createAgentSpec(draft: BuildDraft, trigger: string): AgentSpec {
       cover(
         emailed,
         "output.delivery",
-        put(
-          `Send the email to the recipient setting: a clear subject, then the ${length ? "full read" : "result"}.`,
-          at(/^Write the email:/),
-        ),
+        put(`Send the email to the recipient setting: a clear subject, then the ${length ? "full read" : "result"}.`),
       );
     else if (at(/^Write the email:/) >= 0 && settings.length)
       method[at(/^Write the email:/)] = "Write the email: a clear subject and the result, addressed to the recipient setting.";
@@ -622,7 +621,8 @@ export function createAgentSpec(draft: BuildDraft, trigger: string): AgentSpec {
   const topicsInput = inputs.find((x) => configured.some((q) => q.id === "topics" && q.label === x.label));
   if (topicsInput) cover(need("topics"), `inputs.${topicsInput.name}`);
   const template = worker
-    ? lines(d.template).map((section) => (section === "Proposed email" && self ? "Email sent" : section))
+    ? // A sent email is the deliverable itself, not a section inside it.
+      lines(d.template).filter((section) => !(emailed && section === "Proposed email"))
     : [];
   const boundaries = [
     self

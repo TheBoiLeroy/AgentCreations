@@ -1,5 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { coverageReportSchema, type CoverageReport } from "@agents/jev";
+import { requirementText } from "@agents/spec";
 import { Check, Copy, Download, Braces, ShieldCheck } from "lucide-react";
 import type { AgentSpec } from "@agents/spec";
 import {
@@ -28,14 +30,72 @@ export function download(
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+/** The model's check of the finished agent against the confirmed requirements. */
+function CompletenessCheck({ agent, onEdit }: { agent: AgentSpec; onEdit: () => void }) {
+  const [report, setReport] = useState<CoverageReport>();
+  const requirements = agent.requirements || [];
+  useEffect(() => {
+    if (!requirements.length) return;
+    let active = true;
+    setReport(undefined);
+    fetch("/api/jev", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verify: agent }),
+      signal: AbortSignal.timeout(30000),
+    })
+      .then(async (response) => coverageReportSchema.parse(await response.json()))
+      .catch((): CoverageReport => ({ status: "unavailable", reason: "The model check couldn’t be reached. The automated checks still passed." }))
+      .then((result) => active && setReport(result));
+    return () => {
+      active = false;
+    };
+    // One check per created agent.
+  }, [agent]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!requirements.length) return null;
+  const missing = report?.status === "checked" ? report.results.filter((r) => !r.covered) : [];
+  return (
+    <section className="details-section" aria-label="Completeness check">
+      <h3>Does it do what you asked?</h3>
+      {!report && <p className="hint">Checking the agent against your {requirements.length} requirements…</p>}
+      {report?.status === "unavailable" && <p className="hint">Second check not run. {report.reason}</p>}
+      {report?.status === "checked" && !missing.length && (
+        <p className="hint">
+          <Check size={13} /> A second check found all {requirements.length} requirements in the agent.
+        </p>
+      )}
+      {missing.length > 0 && (
+        <>
+          <ul className="question-list">
+            {missing.map((result) => {
+              const requirement = requirements.find((r) => r.id === result.requirement_id);
+              return (
+                <li key={result.requirement_id}>
+                  <strong>{requirement ? requirementText(requirement) : result.requirement_id}</strong>: {result.problem}
+                  {result.fix && <> Suggested fix: {result.fix}</>}
+                </li>
+              );
+            })}
+          </ul>
+          <button className="text-button" onClick={onEdit}>
+            Edit the details
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
 export function InstallPage({
   agent,
   notify,
   onEdit,
+  personal = {},
 }: {
   agent: AgentSpec;
   notify: (message: string) => void;
   onEdit: () => void;
+  // The owner's own values for per-user settings. Shown here; never written to a download.
+  personal?: Record<string, string>;
 }) {
   const [target, setTarget] = useState<Target>("Pi"),
     [endpoint, setEndpoint] = useState("");
@@ -153,6 +213,27 @@ export function InstallPage({
           <Braces size={16} /> Agent JSON
         </button>
       </div>
+      {(agent.settings?.length || agent.schedule) && (
+        <section className="details-section" aria-label="Your settings">
+          <h3>Set these yourself</h3>
+          {(agent.settings || []).map((setting) => (
+            <p key={setting.id}>
+              <strong>{setting.label}</strong>: not stored in the download.{" "}
+              {setting.env && (
+                <code>
+                  {setting.env}={personal[setting.id]?.trim() || "you@example.com"}
+                </code>
+              )}
+            </p>
+          ))}
+          {agent.schedule && (
+            <p>
+              <strong>Schedule</strong>: meant to run {requirementText({ type: "trigger", value: agent.schedule.cadence }).replace("Runs on its own ", "")}. Downloads can’t start themselves; add it to your own scheduler.
+            </p>
+          )}
+        </section>
+      )}
+      <CompletenessCheck agent={agent} onEdit={onEdit} />
       <div className="test-prompt">
         <span className="eyebrow">GIVE IT A FIRST TASK</span>
         <p>{instructions.example}</p>

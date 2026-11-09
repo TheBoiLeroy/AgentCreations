@@ -240,7 +240,10 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
         ...state,
         draft: {
           ...state.draft,
-          requirements: state.draft.requirements.filter((r) => r.id !== action.id),
+          // Without email delivery there is no recipient to keep.
+          requirements: state.draft.requirements.filter(
+            (r) => r.id !== action.id && !(action.id === "delivery" && r.type === "recipient"),
+          ),
           requirementsConfirmed: false,
         },
         agent: null,

@@ -56,7 +56,7 @@ export function extractRequirements(request: string): Requirement[] {
   const research = first(text, researchWords) || (self && first(text, /\babout\s+my\s+(?:current\s+)?interests\b/i));
   if (research) {
     stated("research", "web", research);
-    const topic = text.match(/\b(?:about|on|covering)\s+(.+?)(?=\s+(?:and|then)\s+(?:e-?mail|send)|\s+(?:every|each|daily|weekly|monthly)\b|[.,;]|$)/i);
+    const topic = text.match(/\b(?:about|on|covering|research(?:es|ing)?)\s+(.+?)(?=\s+(?:and|then)\s+(?:give|write|return|summari[sz]e|tell|show)|\s+(?:and|then)\s+(?:e-?mail|send)|\s+(?:every|each|daily|weekly|monthly)\b|[.,;]|$)/i);
     if (topic && !vagueTopics.test(topic[1].trim())) stated("topics", topic[1].trim().slice(0, 300), topic[0]);
   }
   const tone = text.match(/\b(neutral|unbiased|balanced|friendly|formal|casual|professional|concise)\b/i);
@@ -123,4 +123,60 @@ export function requiredTools(requirements: Pick<Requirement, "type" | "value">[
     ...(requirements.some((r) => r.type === "research") ? ["web-search"] : []),
     ...(requirements.some((r) => r.type === "delivery" && r.value === "email") ? ["send-email"] : []),
   ];
+}
+
+/** The model's verdict per requirement. It judges against the confirmed list, nothing vaguer. */
+export const coverageResultSchema = z
+  .array(
+    z
+      .object({
+        requirement_id: z.string().max(40),
+        covered: z.boolean(),
+        where: z.string().max(400),
+        problem: z.string().max(500),
+        fix: z.string().max(500).default(""),
+      })
+      .strict(),
+  )
+  .max(20);
+export const coverageReportSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("checked"), results: coverageResultSchema }).strict(),
+  z.object({ status: z.literal("unavailable"), reason: z.string().max(200) }).strict(),
+]);
+export type CoverageReport = z.infer<typeof coverageReportSchema>;
+export type CoverageLlm = (payload: { requirements: unknown; agent: string }, signal: AbortSignal) => Promise<unknown>;
+/** Step after the automated checks: one model call, validated, never a silent pass. */
+export async function verifyCoverage(
+  requirements: Pick<Requirement, "id" | "type" | "value" | "quote" | "origin">[],
+  agent: string,
+  llm?: CoverageLlm,
+  timeoutMs = 25000,
+): Promise<CoverageReport> {
+  if (!requirements.length) return { status: "checked", results: [] };
+  if (!llm) return { status: "unavailable", reason: "No model is configured for this check." };
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error("timeout"));
+      }, timeoutMs);
+    });
+    const payload = {
+      requirements: requirements.map(({ id, type, value, quote, origin }) => ({ id, type, value, quote, origin })),
+      agent,
+    };
+    const results = coverageResultSchema.parse(
+      await Promise.race([Promise.resolve().then(() => llm(payload, controller.signal)), timeout]),
+    );
+    // Exactly one verdict per confirmed requirement, or the check didn't happen.
+    const ids = requirements.map((r) => r.id).sort().join();
+    if (results.map((r) => r.requirement_id).sort().join() !== ids) throw new Error("mismatch");
+    return { status: "checked", results };
+  } catch {
+    return { status: "unavailable", reason: "The model check didn’t return a usable answer. The automated checks still passed." };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

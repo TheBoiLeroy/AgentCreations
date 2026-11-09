@@ -146,6 +146,8 @@ test("complete the new flow, customize tools, export and keep created agent afte
     "Customer emails",
   );
   await page.getByRole("button", { name: "Review my agent" }).click();
+  await expect(page.getByRole("button", { name: "Create my agent" })).toBeDisabled();
+  await page.getByRole("button", { name: "Yes, that’s right" }).click();
   await page.getByRole("button", { name: "Create my agent" }).click();
   await expect(
     page.getByRole("heading", { name: "Where do you want to use it?" }),
@@ -430,6 +432,8 @@ test("live agents become Pi extensions with data sources and a toggle command", 
   await page.getByRole("button", { name: "Running agent processes" }).click();
   await page.getByRole("button", { name: "Review my agent" }).click();
   await expect(page.locator(".review-card code")).toHaveText("/agent-tracker");
+  await expect(page.getByRole("button", { name: "Create my agent" })).toBeDisabled();
+  await page.getByRole("button", { name: "Yes, that’s right" }).click();
   await page.getByRole("button", { name: "Create my agent" }).click();
   await expect(page.locator(".test-prompt")).toContainText("/agent-tracker");
   const downloaded = page.waitForEvent("download");
@@ -460,6 +464,8 @@ test("describe an agent, review Jev's assumptions, edit one and create it", asyn
   await page.getByRole("button", { name: "Add the details" }).click();
   await page.getByRole("button", { name: "Review my agent" }).click();
   await expect(page.locator(".review-card code")).toContainText("<signedContracts>");
+  await expect(page.getByRole("button", { name: "Create my agent" })).toBeDisabled();
+  await page.getByRole("button", { name: "Yes, that’s right" }).click();
   await page.getByRole("button", { name: "Create my agent" }).click();
   await expect(page.getByRole("heading", { name: "Where do you want to use it?" })).toBeVisible();
 });
@@ -502,4 +508,62 @@ test("dictation adds spoken words to the description when the browser supports i
   await expect(page.getByLabel("Describe it, and Jev builds the first draft")).toHaveValue("plan my week from my notes");
   await page.getByRole("button", { name: "Stop dictation" }).click();
   await expect(page.getByRole("button", { name: "Dictate your description" })).toBeVisible();
+});
+
+test("the emailed-read request is understood, confirmed and exported without the address", async ({ page }) => {
+  await page.goto("/");
+  await page
+    .getByLabel("Describe it, and Jev builds the first draft")
+    .fill("Agent that will email me a 5 minute read about my current interests");
+  await page.getByRole("button", { name: "Draft my agent" }).click();
+  await page.getByLabel("What topics should it research?").fill("AI,Politics,Energy");
+  await page.getByLabel("Which email should it send to?").fill("owner@personal-mail.dev");
+  await page.getByRole("button", { name: "Review my agent" }).click();
+  const understood = page.getByLabel("What Jev understood");
+  await expect(understood).toContainText("Sends the result by email");
+  await expect(understood).toContainText("You said “email me”");
+  await expect(understood).toContainText("About 1,000–1,200 words (a 5-minute read)");
+  await expect(understood).toContainText("Runs on its own every week");
+  await expect(understood).toContainText("Jev assumed this");
+  // Changing the list needs a fresh yes, and the spec follows the change.
+  await page.getByRole("button", { name: "Yes, that’s right" }).click();
+  await understood.getByLabel("How often it runs").selectOption("daily");
+  await expect(page.getByRole("button", { name: "Create my agent" })).toBeDisabled();
+  await expect(page.locator(".spec-details pre")).toContainText('"cadence": "daily"');
+  await expect(page.locator(".spec-details pre")).not.toContainText("owner@personal-mail.dev");
+  await page.getByRole("button", { name: "Yes, that’s right" }).click();
+  await page.getByRole("button", { name: "Create my agent" }).click();
+  await expect(page.getByLabel("Your settings")).toContainText("EMAIL_TO=owner@personal-mail.dev");
+  // No model key in tests: the second check says it didn't run rather than passing silently.
+  await expect(page.getByLabel("Completeness check")).toContainText("Second check not run");
+  await page.getByRole("button", { name: "Claude Code", exact: true }).click();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download skill" }).click();
+  expect((await download).suggestedFilename()).toContain("skill.zip");
+});
+test("removing a requirement the agent depends on is flagged, and a failed second check shows its fix", async ({ page }) => {
+  await page.route("**/api/jev", async (route) => {
+    const body = route.request().postDataJSON();
+    if (!("verify" in body)) return route.fallback();
+    await route.fulfill({
+      json: {
+        status: "checked",
+        results: body.verify.requirements.map((r: { id: string }, i: number) => ({
+          requirement_id: r.id,
+          covered: i > 0,
+          where: "",
+          problem: i ? "" : "No step delivers the result.",
+          fix: i ? "" : "Add a final step that returns the summary.",
+        })),
+      },
+    });
+  });
+  await page.goto("/");
+  await page.getByLabel("Describe it, and Jev builds the first draft").fill("Read my PDF contracts and summarize the risks");
+  await page.getByRole("button", { name: "Draft my agent" }).click();
+  await page.getByRole("button", { name: "Yes, that’s right" }).click();
+  await page.getByRole("button", { name: "Create my agent" }).click();
+  const check = page.getByLabel("Completeness check");
+  await expect(check).toContainText("Replies in the conversation: No step delivers the result.");
+  await expect(check).toContainText("Suggested fix: Add a final step that returns the summary.");
 });

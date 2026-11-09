@@ -52,7 +52,10 @@ describe("describe-to-create proposals", () => {
     expect(draft.step).toBe("details");
     expect(pendingQuestions(draft).map((q) => q.field).sort()).toEqual(["skillAnswers.recipient", "skillAnswers.topics"]);
     const withAddress = proposeRules("research battery recycling and email me at owner@example.com").draft;
-    expect(withAddress.details.skillAnswers).toEqual({ recipient: "owner@example.com" });
+    // Topics named in the request and an address typed into it answer both questions.
+    expect(withAddress.details.skillAnswers).toEqual({ topics: "battery recycling", recipient: "owner@example.com" });
+    expect(withAddress.step).toBe("review");
+    expect(JSON.stringify(createAgentSpec(withAddress, "battery")).includes("owner@example.com")).toBe(false);
   });
   it("proposes a live extension for a running-agents panel", () => {
     const { draft } = proposeRules("an agent showing me the current agents running in the terminal");

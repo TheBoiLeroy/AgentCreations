@@ -494,6 +494,7 @@ export default function Home() {
                     ) : state.agent ? (
                       <InstallPage
                         agent={state.agent}
+                        personal={state.draft.details.skillAnswers}
                         notify={notify}
                         onEdit={() =>
                           dispatch({ type: "navigate", step: "details" })

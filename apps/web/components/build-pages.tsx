@@ -12,8 +12,12 @@ import {
   X,
 } from "lucide-react";
 import {
+  cadencePhrase,
+  cadences,
   categories,
   inputTypes,
+  requirementText,
+  specConflicts,
   specProblems,
   type AgentSpec,
   type BuildDetails,
@@ -1121,6 +1125,61 @@ export function ReviewPage({ draft, dispatch, trigger }: PageProps) {
         </div>
       </div>
       <ProblemList title="Fix these before creating" problems={blocking} />
+      {draft.requirements.length > 0 && (
+        <section className="details-section" aria-label="What Jev understood">
+          <h3>What Jev understood</h3>
+          <p className="hint">
+            The agent is built from this list. Remove anything that’s wrong,
+            then confirm.
+          </p>
+          <ul className="requirement-list">
+            {draft.requirements.map((r) => (
+              <li key={r.id}>
+                <span>
+                  <strong>{requirementText(r)}</strong>
+                  <small>{r.origin === "stated" ? `You said “${r.quote}”` : "Jev assumed this"}</small>
+                </span>
+                {r.type === "trigger" && (
+                  <select
+                    aria-label="How often it runs"
+                    value={r.value}
+                    onChange={(e) => dispatch({ type: "requirement-set", id: r.id, value: e.target.value })}
+                  >
+                    {cadences.map((cadence) => (
+                      <option key={cadence} value={cadence}>
+                        {cadencePhrase(cadence)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  className="text-button"
+                  aria-label={`Remove: ${requirementText(r)}`}
+                  onClick={() => dispatch({ type: "requirement-remove", id: r.id })}
+                >
+                  <X size={13} /> Not what I meant
+                </button>
+              </li>
+            ))}
+          </ul>
+          {specConflicts(spec).map((conflict) => (
+            <p className="hint" key={conflict}>
+              <ShieldCheck size={13} /> {conflict}
+            </p>
+          ))}
+          {draft.requirementsConfirmed ? (
+            <p className="hint">
+              <Check size={13} /> Confirmed.
+            </p>
+          ) : (
+            <div className="actions">
+              <button className="button" onClick={() => dispatch({ type: "requirements-confirm" })}>
+                <Check size={15} /> Yes, that’s right
+              </button>
+            </div>
+          )}
+        </section>
+      )}
       {draft.assumed.length > 0 && (
         <div className="follow-up" aria-label="Jev’s assumptions">
           <Sparkles size={18} />
@@ -1223,7 +1282,7 @@ export function ReviewPage({ draft, dispatch, trigger }: PageProps) {
       <div className="page-actions right">
         <button
           className="button primary"
-          disabled={blocking.length > 0}
+          disabled={blocking.length > 0 || (draft.requirements.length > 0 && !draft.requirementsConfirmed)}
           onClick={() => dispatch({ type: "created", trigger })}
         >
           Create my agent <Check size={17} />

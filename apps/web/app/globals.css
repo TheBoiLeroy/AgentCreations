@@ -1465,3 +1465,36 @@ footer > span:last-child {
   width: auto;
   margin: 0;
 }
+.requirement-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.requirement-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.requirement-list li > span {
+  display: grid;
+  gap: 3px;
+  flex: 1 1 260px;
+}
+.requirement-list strong {
+  font-weight: 500;
+  color: var(--ink);
+}
+.requirement-list small {
+  color: var(--muted);
+}
+.requirement-list select {
+  width: auto;
+  margin: 0;
+}

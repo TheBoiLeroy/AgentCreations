@@ -68,6 +68,16 @@ To enable Jev's optional model pass, set `JEV_API_KEY` (an Anthropic API key) an
 
 The optional Jev route has a per-process enhancement budget of 20 calls/minute and three concurrent model calls. Rules remain available when that budget is exhausted. For public multi-instance hosting, add authenticated user quotas and shared rate limiting before enabling a paid key. Recommendations describe capabilities; they do not connect accounts or change the Pi/MCP runtime's permissions.
 
+## From request to checked agent
+
+1. **Requirements.** The request is read into a typed list (delivery, recipient, length, schedule, research, topics, tone, approval), each with the words it came from or marked as assumed. “Email me a 5 minute read” becomes email delivery to yourself and a 1,000–1,200 word target; “an agent that will email me…” assumes a weekly run.
+2. **Confirmation.** The review page shows the list in plain sentences. Remove what is wrong, change the cadence, and confirm before the agent can be created.
+3. **Coverage.** Each requirement must land in the spec: a method step, a setting, a schedule, a tool or a boundary. An uncovered one blocks creation and export with a message that says how to fix it.
+4. **Output checks.** Every export is checked for duplicate sections, a malformed or pasted description, configured inputs called optional, email addresses, and uncovered requirements.
+5. **Second check.** After creation, one model call compares the agent with the confirmed list and shows any gap with a suggested fix. It needs `JEV_API_KEY` and `JEV_MODEL` in `apps/web/.env.local`; without them the page says the check did not run.
+
+Email addresses are per-user settings (`EMAIL_TO` for Pi) and are never written into a spec or download. Mail to your own address sends without an approval prompt; every other external action still asks. A schedule is recorded and explained in the export, but nothing here runs agents on a timer: you add the command to your own scheduler. A recorded-actions test run of the generated agent is not built.
+
 ## Profiles and shareable setups
 
 A setup is one person's package of skills: skills referenced by their GitHub/skills.sh source, plus agents built in the workshop. `/explore` lists published setups, `/u/<handle>` is a public profile, `/u/<handle>/<setup>` shows the items with one copyable install script (`npx skills add … --skill …` per skill) and download / "Add to my agents" buttons for each agent. `/me` is where a signed-in person creates, edits, publishes or deletes their setups.
