@@ -1,0 +1,9 @@
+# Never upload secrets, local data or build/test output from this machine.
+**/.env*
+.data
+**/.next*
+**/node_modules
+test-results
+playwright-report
+agents
+*.log
