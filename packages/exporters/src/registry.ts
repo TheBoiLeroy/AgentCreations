@@ -58,7 +58,7 @@ export const toolRegistry: Record<string, RegistryEntry> = {
     action: "send-email",
     env: ["RESEND_API_KEY", "EMAIL_FROM"],
     instruction:
-      'You can\'t send email yourself. To propose one, end your result with exactly one fenced block tagged send-email that holds JSON: {"to": "<recipient>", "subject": "<subject>", "body": "<plain-text body>"}. Use the configured recipient. The user reviews it and the command sends it only after they approve.',
+      'You can\'t send email yourself. Instead, end your result with exactly one fenced block tagged send-email that holds JSON: {"to": "recipient", "subject": "<subject>", "body": "<plain-text body>"}. Keep "to" as the word recipient; the command fills in the recipient setting.',
   },
   "read-email": {
     kind: "unsupported",

@@ -23,6 +23,7 @@ import {
   suggestDetails,
   usesSkillQuestions,
 } from "./index";
+import { mergeRequirements, requiredTools } from "./requirements";
 
 type Category = z.infer<typeof categorySchema>;
 export const describeInputSchema = z
@@ -64,6 +65,8 @@ export const describeLlmSchema = z
     method: z.array(z.string().trim().min(1).max(500)).max(8),
     whenToUse: z.string().trim().max(1024),
     topics: z.string().trim().max(500),
+    // Validated by mergeRequirements so a bad list never discards the rest.
+    requirements: z.unknown().optional(),
   })
   .strict();
 type Guess = Partial<z.infer<typeof describeLlmSchema>> & {
@@ -181,7 +184,8 @@ function assemble(description: string, guess: Guess, mode: Proposal["mode"]): Pr
       ? { ...pick, reason: `Your description suggests “${chipLabels.get(pick.id)}”.`, confidence: 0.75 }
       : pick,
   );
-  for (const id of guess.tools || [])
+  const requirements = mergeRequirements(text, rules.requirements, guess.requirements);
+  for (const id of [...(guess.tools || []), ...requiredTools(requirements)])
     if (!recommendations.some((pick) => pick.id === id))
       recommendations.push({
         id,
@@ -203,6 +207,7 @@ function assemble(description: string, guess: Guess, mode: Proposal["mode"]): Pr
     recommendations,
     selectedTools: recommendations.filter((pick) => !optional(pick)).map((pick) => pick.id),
     noticed: rules.noticed,
+    requirements,
     step: "review",
   };
   const details: BuildDetails = suggestDetails(base);
@@ -228,9 +233,10 @@ function assemble(description: string, guess: Guess, mode: Proposal["mode"]): Pr
   if (usesSkillQuestions(base)) {
     const ids = new Set(skillQuestions(base).map((q) => q.id));
     const email = firstEmail(text);
-    if (ids.has("topics") && guess.topics) {
-      details.skillAnswers = { ...details.skillAnswers, topics: guess.topics };
-      assumed.push(`Research topics: ${guess.topics}.`);
+    const topics = guess.topics || requirements.find((r) => r.type === "topics")?.value;
+    if (ids.has("topics") && topics) {
+      details.skillAnswers = { ...details.skillAnswers, topics };
+      assumed.push(`Research topics: ${topics}.`);
     }
     if (ids.has("recipient") && email) {
       details.skillAnswers = { ...details.skillAnswers, recipient: email };
@@ -255,10 +261,8 @@ function assemble(description: string, guess: Guess, mode: Proposal["mode"]): Pr
       "Result\nAssumptions";
     const steps = (guess.method || []).filter((step) => !askPattern.test(step));
     if (steps.length) details.method = steps.map((step, i) => `${i + 1}. ${step}`).join("\n");
-    details.whenToUse =
-      guess.whenToUse && !isVagueWhenToUse(guess.whenToUse)
-        ? guess.whenToUse
-        : `Use when the user asks for this: ${taskPhrase(text).slice(0, 300)}.`;
+    // Left blank, the spec composes the trigger sentence from its parts; the request is never pasted in.
+    details.whenToUse = guess.whenToUse && !isVagueWhenToUse(guess.whenToUse) ? guess.whenToUse : "";
     // "Ask me before…" needs a mode that is allowed to ask.
     if (askPattern.test(text)) {
       details.conversation = "followUp";
@@ -267,7 +271,6 @@ function assemble(description: string, guess: Guess, mode: Proposal["mode"]): Pr
     assumed.push(
       `Starts with: ${details.inputs.map((input) => input.label).join(", ")}.`,
       `The result has these sections: ${details.template.split("\n").join(", ")}.`,
-      `When to suggest it: ${details.whenToUse}`,
     );
   } else if (details.dataSources.length) {
     assumed.push(`Watches: ${details.dataSources.join(", ")}.`);

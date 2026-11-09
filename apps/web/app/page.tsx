@@ -187,6 +187,9 @@ export default function Home() {
         context: spec.needs.context || spec.instructions,
         selectedTools: spec.tools.map((t) => t.id).filter((id) => getTool(id)),
         details: detailsFromSpec(spec),
+        // A saved agent's requirements were confirmed when it was created.
+        requirements: (spec.requirements || []).map((r) => ({ ...r, coveredBy: [] })),
+        requirementsConfirmed: true,
         step: "install",
       },
     };

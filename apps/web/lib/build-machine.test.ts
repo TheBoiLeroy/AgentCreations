@@ -132,6 +132,8 @@ describe("follow-up details", () => {
     });
     state = buildReducer(state, { type: "navigate", step: "review" });
     expect(state.draft.step).toBe("review");
+    expect(buildReducer(state, { type: "created", trigger: "estimates" }).error).toContain("Confirm what Jev understood");
+    state = buildReducer(state, { type: "requirements-confirm" });
     state = buildReducer(state, { type: "created", trigger: "estimates" });
     expect(state.agent?.inputs.map((x) => x.name)).toEqual(["pastEstimates", "newJob"]);
     // Back keeps the answers.
@@ -161,6 +163,7 @@ describe("describe-to-create", () => {
     expect(state.draft.selectedTools).toContain("read-files");
     state = buildReducer(state, { type: "navigate", step: "review" });
     expect(state.error).toBe("");
+    state = buildReducer(state, { type: "requirements-confirm" });
     state = buildReducer(state, { type: "created", trigger: "contracts" });
     expect(state.error).toBe("");
     expect(state.agent?.inputs.map((x) => x.label)).toEqual(["Files to work from", "Details for this run"]);

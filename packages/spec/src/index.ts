@@ -1,5 +1,7 @@
 import { z } from "zod";
 export * from "./skills";
+export * from "./requirements";
+import { cadencePhrase, cadences, minutesToRead, requirementText, requirementsSchema, wordRange, type Requirement } from "./requirements";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 export const categories = [
@@ -166,6 +168,17 @@ export const agentInputSchema = z
     type: z.enum(inputTypes),
     formats: z.array(formatToken).max(20),
     required: z.boolean(),
+    // A value set in the builder. The input is then configured, not optional.
+    default: z.string().max(2000).optional(),
+  })
+  .strict();
+// A value each person supplies for themselves (an address, a name). Never stored in a spec.
+export const settingSchema = z
+  .object({
+    id: triggerSchema,
+    label: text(200),
+    type: z.enum(["text", "email"]),
+    env: z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/).optional(),
   })
   .strict();
 export type AgentInput = z.infer<typeof agentInputSchema>;
@@ -189,6 +202,11 @@ export const agentSchema = z
         ...outputBase,
         kind: z.enum(outputKinds),
         template: z.array(text(200)).max(20),
+        delivery: z.enum(["conversation", "email"]).optional(),
+        length: z
+          .object({ minWords: z.number().int().positive(), maxWords: z.number().int().positive() })
+          .strict()
+          .optional(),
       })
       .strict(),
     method: z.array(text(500)).max(20),
@@ -197,6 +215,10 @@ export const agentSchema = z
     skill: z.object({ whenToUse: text(1024) }).strict(),
     needs: needsSchema,
     tools: z.array(toolSchema).max(30),
+    // Recurring, unattended runs. The slash command is `trigger`; this is when it runs.
+    schedule: z.object({ cadence: z.enum(cadences) }).strict().optional(),
+    settings: z.array(settingSchema).max(10).optional(),
+    requirements: requirementsSchema.optional(),
   })
   .strict()
   .refine((s) => s.slug === s.trigger, {
@@ -289,7 +311,7 @@ export const exampleAgent: AgentSpec = {
     connections: [],
     inputChips: ["spreadsheet"],
     outputChips: ["summary"],
-    context: "Sort incoming leads by fit and urgency.",
+    context: "Rank this week's form submissions so I know who to call first.",
   },
   tools: [
     { id: "read-files", requiresApproval: false },
@@ -377,6 +399,75 @@ export interface SpecProblem {
 export const isAnalysisAgent = (s: Pick<AgentSpec, "category" | "tools">) =>
   s.category === "information-analysis" ||
   s.tools.some((tool) => tool.id === "analyze-data");
+const coverageHints: Record<Requirement["type"], string> = {
+  delivery: "Switch on “Send email” in the skills, or remove this requirement.",
+  recipient: "Switch on “Send email” so the recipient becomes a setting.",
+  length: "Only worker agents write to a length. Remove this requirement or the live-panel choice.",
+  trigger: "Only worker agents can run on a schedule. Remove this requirement or the live-panel choice.",
+  topics: "Switch on “Search the web” so the topics are used.",
+  research: "Switch on “Search the web” in the skills, or remove this requirement.",
+  tone: "Add a method step that sets the tone.",
+  approval: "Add an approval boundary for it.",
+  other: "Add a method step for it.",
+};
+/** Whether a coverage reference points at something that exists in the spec. */
+function resolves(s: AgentSpec, path: string): boolean {
+  const [head, rest = ""] = path.split(/\.(.*)/s);
+  if (head === "method") return /^\d+$/.test(rest) && Number(rest) < s.method.length;
+  if (head === "boundaries") return /^\d+$/.test(rest) && Number(rest) < s.boundaries.length;
+  if (head === "schedule") return !!s.schedule;
+  if (head === "settings") return !!s.settings?.some((x) => x.id === rest);
+  if (head === "tools") return s.tools.some((x) => x.id === rest);
+  if (head === "inputs") return s.inputs.some((x) => x.name === rest);
+  if (path === "output.length") return !!s.output.length;
+  if (path === "output.delivery") return !!s.output.delivery;
+  return path === "output.destination";
+}
+/** What each requirement type needs to be true of the spec, whatever coveredBy claims. */
+function satisfied(s: AgentSpec, r: Requirement): boolean {
+  const send = s.tools.find((tool) => tool.id === "send-email");
+  switch (r.type) {
+    case "delivery":
+      return r.value === "email"
+        ? !!send && s.output.delivery === "email" && s.method.some((step) => /\bsend\b/i.test(step))
+        : s.output.delivery !== "email";
+    case "recipient":
+      return !!send && !!s.settings?.some((x) => x.type === "email") && (r.value !== "self" || !send.requiresApproval);
+    case "length": {
+      const range = wordRange(r.value);
+      return !!range && s.output.length?.minWords === range.minWords && s.output.length.maxWords === range.maxWords;
+    }
+    case "trigger":
+      return s.schedule?.cadence === r.value && s.runtime === "worker";
+    case "research":
+      return s.tools.some((tool) => tool.id === "web-search");
+    default:
+      return true;
+  }
+}
+/** Every confirmed requirement must be covered by a real place in the spec. Never dropped quietly. */
+export function requirementProblems(s: AgentSpec): SpecProblem[] {
+  return (s.requirements || []).flatMap((r) =>
+    r.coveredBy.length && r.coveredBy.every((path) => resolves(s, path)) && satisfied(s, r)
+      ? []
+      : [
+          {
+            check: "requirement",
+            field: `requirements.${r.id}`,
+            message: `“${requirementText(r)}” isn’t handled by this agent yet. ${coverageHints[r.type]}`,
+          },
+        ],
+  );
+}
+/** Rules that pull against each other. Resolved by an explicit default, then shown to the user. */
+export function specConflicts(s: AgentSpec): string[] {
+  const waits = s.tools.filter((tool) => tool.requiresApproval).map((tool) => tool.id);
+  return s.schedule && waits.length
+    ? [
+        `It runs on its own ${cadencePhrase(s.schedule.cadence)}, but ${waits.join(", ")} must wait for your approval. Each scheduled run pauses there until you say yes.`,
+      ]
+    : [];
+}
 /** Target-independent export checks. Any problem stops the export. */
 export function specProblems(input: AgentSpec): SpecProblem[] {
   const s = agentSchema.parse(input);
@@ -451,6 +542,7 @@ export function specProblems(input: AgentSpec): SpecProblem[] {
         "List the sections the result must have.",
       );
   }
+  for (const problem of requirementProblems(s)) problems.push(problem);
   const names = new Set<string>();
   s.inputs.forEach((x, i) => {
     if (names.has(x.name))
@@ -469,10 +561,35 @@ export function specProblems(input: AgentSpec): SpecProblem[] {
 function section(title: string, lines: string[]) {
   return lines.length ? `\n## ${title}\n${lines.join("\n")}\n` : "";
 }
+/** One input, with its real status: required, optional, or already configured. */
 export function inputLine(x: AgentInput) {
-  return `- ${x.name} (${x.type}${x.formats.length ? `: ${x.formats.join(", ")}` : ""}${x.required ? "" : ", optional"}): ${x.label}`;
+  const status =
+    x.default !== undefined
+      ? `configured as ${JSON.stringify(x.default)}; pass a value to override it`
+      : x.required
+        ? "required"
+        : "optional";
+  return `- ${x.name} (${x.type}${x.formats.length ? `: ${x.formats.join(", ")}` : ""}, ${status}): ${x.label}`;
 }
-export function gapRule(s: Pick<AgentSpec, "conversation">, host = false) {
+/** Per-user settings. The file names them; each person supplies the value. */
+export function settingLines(s: Pick<AgentSpec, "settings">) {
+  return (s.settings || []).map(
+    (x) => `- ${x.label} (${x.type})${x.env ? `: read from ${x.env}` : ""}. Not stored in this file.`,
+  );
+}
+export function scheduleLine(s: Pick<AgentSpec, "schedule">) {
+  return s.schedule ? `Meant to run on its own ${cadencePhrase(s.schedule.cadence)}.` : "";
+}
+export function lengthLine(s: Pick<AgentSpec, "output">) {
+  const range = s.output.length;
+  return range
+    ? `Length: about ${range.minWords}–${range.maxWords} words (a ${minutesToRead(range)}-minute read).`
+    : "";
+}
+export function gapRule(s: Pick<AgentSpec, "conversation" | "schedule">, host = false) {
+  // Nobody is there to answer a scheduled run, so it must never wait on a question.
+  if (host && s.schedule)
+    return "This agent runs unattended. Never stop to ask a question: make a reasonable assumption, continue, and list your assumptions in the result.";
   // A host agent runs the skill in the user's conversation, so it can pause for approval.
   if (host)
     return "If an input is missing or unclear, make a reasonable assumption, state it, and list your assumptions in the result. Ask only when you can't continue without the answer.";
@@ -485,9 +602,31 @@ export function agentPrompt(input: AgentSpec): string {
   const s = agentSchema.parse(input);
   const tools = s.tools.map(
     (t) =>
-      `- ${t.id}: ${t.requiresApproval ? "Asks before sending or changing" : "Read or draft only"}${t.skillSource ? `\n  External skill: https://skills.sh/${t.skillSource.repository}/${t.skillSource.skill}\n  Manual setup after reviewing the source: npx skills add ${t.skillSource.repository} --skill ${t.skillSource.skill}\n  Not bundled or installed. Requires a compatible runtime and its dependencies; does not grant permissions. Restricted workers may not support this skill.` : ""}`,
+      `- ${t.id}: ${t.requiresApproval ? "Asks before sending or changing" : t.id === "send-email" ? "Sends only to the recipient setting, without asking" : "Read or draft only"}${t.skillSource ? `\n  External skill: https://skills.sh/${t.skillSource.repository}/${t.skillSource.skill}\n  Manual setup after reviewing the source: npx skills add ${t.skillSource.repository} --skill ${t.skillSource.skill}\n  Not bundled or installed. Requires a compatible runtime and its dependencies; does not grant permissions. Restricted workers may not support this skill.` : ""}`,
   );
-  return `# ${s.name}\n\n${s.description}\n\n## Task\n${s.instructions}\n\n## Input\n${s.startsWith}\n${section("Inputs", s.inputs.map(inputLine))}${section("Method", s.method.map((x, i) => `${i + 1}. ${x}`))}\n## Deliverable\n${s.givesBack}\n${section("Required sections", s.output.template.map((x) => `- ${x}`))}\n## Requirements\n- Files: ${s.needs.files.join("; ") || "None"}\n- Web access: ${s.needs.web ? "Required; work from supplied content if unavailable" : "Not required"}\n- App connections: ${s.needs.connections.join("; ") || "None"}\n\n## Selected tools\n${tools.join("\n") || "No tools selected."}\n\nRequirements describe needed inputs, not granted permissions. Never invent access. Never request credentials in chat or include secrets in output.\n\n## Missing inputs\n${gapRule(s, true)}\n\n## Approval boundaries\n${s.boundaries.map((x) => `- ${x}`).join("\n")}\nBefore any action that needs approval, show exactly what you'll do and wait for the user's yes.\n\n## Output\nFormat: ${s.output.format}\nDestination: ${s.output.destination}\n`;
+  const approvals = s.tools.some((t) => t.requiresApproval);
+  // Each heading appears once. The description lives in the frontmatter, not the body.
+  return [
+    `# ${s.name}\n`,
+    `\n## Task\n${s.instructions}\n`,
+    section("Inputs", s.inputs.map(inputLine)),
+    section("Settings (each person sets their own)", settingLines(s)),
+    section("Method", s.method.map((x, i) => `${i + 1}. ${x}`)),
+    `\n## Deliverable\n${s.givesBack}.\n${s.output.template.length ? `Use these sections, in this order:\n${s.output.template.map((x) => `- ${x}`).join("\n")}\n` : ""}${[lengthLine(s), `Format: ${s.output.format}`, `Destination: ${s.output.destination}`].filter(Boolean).join("\n")}\n`,
+    section(
+      "Schedule",
+      s.schedule
+        ? [
+            scheduleLine(s),
+            "A skill cannot start itself. Run it from your host’s scheduler (a scheduled task or routine); otherwise it runs when asked.",
+          ]
+        : [],
+    ),
+    `\n## Access\n- Files: ${s.needs.files.join("; ") || "None"}\n- Web access: ${s.needs.web ? "Required; work from supplied content if unavailable" : "Not required"}\n- App connections: ${s.needs.connections.join("; ") || "None"}\n`,
+    `\n## Selected tools\n${tools.join("\n") || "No tools selected."}\n\nThis section lists what the agent needs, not permissions it has been given. Never invent access. Never request credentials in chat or include secrets in output.\n`,
+    `\n## Missing inputs\n${gapRule(s, true)}\n`,
+    `\n## Approval boundaries\n${s.boundaries.map((x) => `- ${x}`).join("\n")}\n${approvals ? "Before any action that needs approval, show exactly what you'll do and wait for the user's yes.\n" : ""}`,
+  ].join("");
 }
 
 export const steps = [
@@ -563,6 +702,9 @@ export const draftSchema = z
     details: detailsSchema.default(emptyDetails),
     // Defaults Jev chose from a one-sentence description, shown on review.
     assumed: z.array(text(300)).max(20).default([]),
+    // What Jev understood from the request. The user confirms the list before creating.
+    requirements: requirementsSchema.default([]),
+    requirementsConfirmed: z.boolean().default(false),
     step: z.enum(steps),
   })
   .strict();
@@ -579,5 +721,7 @@ export const emptyDraft: BuildDraft = {
   followUp: "",
   details: emptyDetails,
   assumed: [],
+  requirements: [],
+  requirementsConfirmed: false,
   step: "category",
 };

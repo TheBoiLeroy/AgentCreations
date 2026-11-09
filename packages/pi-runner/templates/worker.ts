@@ -22,6 +22,7 @@ interface Spec {
   conversation: 'oneShot' | 'followUp';
   output: { kind: string; destination: string };
   skillAnswers?: Record<string, string>;
+  tools?: { id: string; requiresApproval: boolean }[];
 }
 interface WorkerConfig {
   tools: string[];
@@ -53,6 +54,10 @@ export function emailProposal(text: string): EmailProposal | { error: string } |
   return { to: email.to.trim(), subject: email.subject.trim().replace(/[\r\n]+/g, ' '), body: email.body.trim() };
 }
 
+/** Sending asks first unless the spec explicitly marks send-email as not needing approval. */
+export function needsApproval(spec: Pick<Spec, 'tools'>): boolean {
+  return spec.tools?.find((tool) => tool.id === 'send-email')?.requiresApproval !== false;
+}
 /** Configured recipients only: page content can't redirect an email to someone else. */
 export function allowedRecipients(spec: Pick<Spec, 'skillAnswers'>, env: Record<string, string | undefined>): string[] {
   return [spec.skillAnswers?.recipient, env.EMAIL_TO]
@@ -234,6 +239,8 @@ export default function (pi: ExtensionAPI) {
         if (!proposal) return;
         if ('error' in proposal) return ctx.ui.notify('Email not sent: ' + proposal.error, 'warning');
         const allowed = allowedRecipients(spec, process.env);
+        // The worker never sees the address: "recipient" means the configured setting.
+        if (proposal.to.toLowerCase() === 'recipient' && allowed.length) proposal.to = allowed[0];
         if (!allowed.includes(proposal.to.toLowerCase()))
           return ctx.ui.notify(
             'Email not sent: ' + proposal.to + ' is not the configured recipient' + (allowed.length ? ' (' + allowed.join(', ') + ').' : '. Set EMAIL_TO.'),
@@ -242,9 +249,12 @@ export default function (pi: ExtensionAPI) {
         const key = process.env.RESEND_API_KEY;
         const from = process.env.EMAIL_FROM;
         if (!key || !from) return ctx.ui.notify('Email not sent: set RESEND_API_KEY and EMAIL_FROM before starting Pi.', 'warning');
-        if (!ctx.hasUI) return ctx.ui.notify('Email not sent: approval needs an interactive Pi session.', 'warning');
-        const approved = await ctx.ui.confirm('Send this email?', 'To: ' + proposal.to + '\nSubject: ' + proposal.subject + '\n\n' + proposal.body.slice(0, 4000));
-        if (!approved || generation !== runGeneration) return ctx.ui.notify('Email not sent.', 'info');
+        // Mail to the owner's own configured address is the one send that skips approval.
+        if (needsApproval(spec)) {
+          if (!ctx.hasUI) return ctx.ui.notify('Email not sent: approval needs an interactive Pi session.', 'warning');
+          const approved = await ctx.ui.confirm('Send this email?', 'To: ' + proposal.to + '\nSubject: ' + proposal.subject + '\n\n' + proposal.body.slice(0, 4000));
+          if (!approved || generation !== runGeneration) return ctx.ui.notify('Email not sent.', 'info');
+        }
         const response = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },

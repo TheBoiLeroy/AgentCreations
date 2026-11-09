@@ -38,19 +38,27 @@ describe("skill-driven research mailer", () => {
   it("exports answers with no technical questions, preserving them on reopen", () => {
     const spec = createAgentSpec(draft, "research-mailer");
     expect(spec.runtime).toBe("worker");
-    expect(spec.instructions).toContain("Battery recycling");
+    expect(spec.inputs).toEqual([
+      { name: "researchTopics", label: "Research topics", type: "text", formats: [], required: false, default: "Battery recycling" },
+    ]);
     expect(specProblems(spec)).toEqual([]);
-    expect(detailsFromSpec(spec).skillAnswers).toEqual(draft.details.skillAnswers);
+    // The recipient is one person's setting: it stays in the draft and never enters the spec.
+    expect(detailsFromSpec(spec).skillAnswers).toEqual({ topics: "Battery recycling" });
+    expect(spec.settings).toEqual([{ id: "recipient", label: "Email recipient", type: "email", env: "EMAIL_TO" }]);
+    expect(JSON.stringify(spec)).not.toContain("owner@example.com");
     expect(spec.tools.find((t) => t.id === "send-email")?.requiresApproval).toBe(true);
   });
   it("writes a research method, a real trigger and optional configured inputs", () => {
     const spec = createAgentSpec(draft, "research-mailer");
     expect(spec.method[0]).toContain("Search the web");
     expect(spec.method.join(" ")).not.toContain("Calculate totals");
-    expect(spec.skill.whenToUse).toBe("Use when the user asks to research a topic and email me, or runs Research Mailer.");
+    expect(spec.description).toBe(
+      "Researches Battery recycling and returns a sourced summary. Use when the user wants a researched summary on Battery recycling, or runs /research-mailer.",
+    );
+    expect(spec.skill.whenToUse).toBe("Use when the user wants a researched summary on Battery recycling, or runs /research-mailer.");
     expect(spec.output.template).toEqual(["Findings", "Sources", "Proposed email", "Assumptions"]);
     expect(spec.inputs.every((input) => !input.required)).toBe(true);
-    expect(spec.instructions).toContain("- Email recipient: owner@example.com");
+    expect(spec.instructions).not.toContain("owner@example.com");
     expect(spec.instructions).not.toContain("{");
   });
   it("exports the research mailer to Pi with search and approved email", () => {
@@ -65,6 +73,10 @@ describe("skill-driven research mailer", () => {
     expect(isVagueWhenToUse("Use when I ask for a news digest")).toBe(false);
     const plain = { ...emptyDraft, category: "creation-communication" as const, name: "Notes", context: "summarize meeting notes", selectedTools: ["draft-text"] };
     const details = { ...suggestDetails(plain), inputs: [{ label: "Meeting notes", type: "text" as const, formats: [], required: true }], template: "Summary", whenToUse: "never" };
-    expect(pendingQuestions({ ...plain, details }).map((q) => q.field)).toContain("whenToUse");
+    // A vague answer is no longer a blocker: the trigger sentence is composed instead.
+    expect(pendingQuestions({ ...plain, details })).toEqual([]);
+    expect(createAgentSpec({ ...emptyDraft, ...plain, details }, "notes").skill.whenToUse).toBe(
+      "Use when the user wants summary from meeting notes, or runs /notes.",
+    );
   });
 });

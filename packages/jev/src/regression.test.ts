@@ -100,7 +100,7 @@ describe("Estimates regression", () => {
       "What does this agent start with?",
     );
     const questions = pendingQuestions(seeded(estimatesForm)).map((q) => q.field);
-    expect(questions).toEqual(["inputs.0.label", "inputs.1.label", "whenToUse"]);
+    expect(questions).toEqual(["inputs.0.label", "inputs.1.label"]);
     expect(seeded(estimatesForm).details.method).toContain("per-unit rates");
   });
   const answered = (): BuildDraft => {

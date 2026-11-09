@@ -64,6 +64,9 @@ export type Action =
   | { type: "navigate"; step: BuildStep }
   | { type: "recommended"; result: JevResult }
   | { type: "proposed"; proposal: Proposal }
+  | { type: "requirement-remove"; id: string }
+  | { type: "requirement-set"; id: string; value: string }
+  | { type: "requirements-confirm" }
   | { type: "toggle-tool"; id: string }
   | { type: "details"; patch: Partial<BuildDetails> }
   | { type: "reset-details" }
@@ -90,6 +93,8 @@ const invalidate = (
     noticed: [],
     followUp: "",
     assumed: [],
+    requirements: [],
+    requirementsConfirmed: false,
   },
   agent: null,
   error: "",
@@ -180,7 +185,8 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
         notice: "",
       };
     }
-    case "recommended":
+    case "recommended": {
+      const topics = action.result.requirements.find((r) => r.type === "topics")?.value;
       return state.draft.step !== "jev"
         ? state
         : {
@@ -192,6 +198,16 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
               selectedTools: action.result.recommendations.map((r) => r.id),
               noticed: action.result.noticed,
               followUp: action.result.followUp,
+              requirements: action.result.requirements,
+              requirementsConfirmed: false,
+              // Topics named in the request answer the topics question in advance.
+              details: {
+                ...state.draft.details,
+                skillAnswers: {
+                  ...(topics ? { topics } : {}),
+                  ...state.draft.details.skillAnswers,
+                },
+              },
             },
             direction: 1,
             notice:
@@ -200,6 +216,7 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
                 : "",
             error: "",
           };
+    }
     case "proposed": {
       // A describe request that finishes after the user moved on is stale.
       if (!state.ready || state.draft.step !== "category") return state;
@@ -217,6 +234,33 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
         }`,
       };
     }
+    // Any change to the list needs a fresh confirmation.
+    case "requirement-remove":
+      return {
+        ...state,
+        draft: {
+          ...state.draft,
+          requirements: state.draft.requirements.filter((r) => r.id !== action.id),
+          requirementsConfirmed: false,
+        },
+        agent: null,
+        error: "",
+      };
+    case "requirement-set":
+      return {
+        ...state,
+        draft: {
+          ...state.draft,
+          requirements: state.draft.requirements.map((r) =>
+            r.id === action.id ? { ...r, value: action.value } : r,
+          ),
+          requirementsConfirmed: false,
+        },
+        agent: null,
+        error: "",
+      };
+    case "requirements-confirm":
+      return { ...state, draft: { ...state.draft, requirementsConfirmed: true }, error: "" };
     case "toggle-tool":
       return {
         ...state,
@@ -256,6 +300,8 @@ export function buildReducer(state: BuildState, action: Action): BuildState {
         error: "",
       };
     case "created": {
+      if (state.draft.requirements.length && !state.draft.requirementsConfirmed)
+        return { ...state, error: "Confirm what Jev understood before creating the agent." };
       try {
         const agent = createAgentSpec(state.draft, action.trigger);
         const problems = specProblems(agent);
