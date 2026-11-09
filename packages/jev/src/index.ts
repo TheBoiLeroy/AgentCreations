@@ -70,6 +70,13 @@ const defaults: Record<JevInput["category"], ToolId[]> = {
 };
 // Unicode token boundaries: “email” must not match “voicemail” or “emailing”.
 export const matchesKeyword = hasWord;
+/** The request is about mail the user receives, not mail the agent sends. */
+export function readsMailbox(text: string) {
+  return (
+    /\b(?:inbox|gmail|mailbox|my e-?mails|incoming e-?mails?|unread|e-?mails? (?:i|we) (?:get|receive))\b/i.test(text) ||
+    /\b(?:read|check|scan|sort|triage|summari[sz]e|go through|reply to|answer)(?:s|ing)?\s+(?:my\s+|the\s+|new\s+|customer\s+|incoming\s+)*e-?mails?\b/i.test(text)
+  );
+}
 export function recommendRules(raw: JevInput): JevResult {
   const input = jevInputSchema.parse(raw);
   const picks = new Map<string, JevResult["recommendations"][number]>(),
@@ -92,7 +99,8 @@ export function recommendRules(raw: JevInput): JevResult {
       matchesKeyword(input.context, word),
     );
     matches.forEach((word) => noticed.add(word));
-    if (tool.id === "read-email" && hasWord(input.context, "email me") && !input.inputChips.includes("emails")) continue;
+    // "Email me", "sends me an email": the agent writes email, it doesn't read a mailbox.
+    if (tool.id === "read-email" && !input.inputChips.includes("emails") && !readsMailbox(input.context)) continue;
     if (matches.length && !picks.has(tool.id))
       picks.set(tool.id, {
         id: tool.id,

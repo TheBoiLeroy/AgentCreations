@@ -174,3 +174,25 @@ describe("requirement coverage", () => {
     expect(specProblems(shortened).map((p) => p.field)).toEqual(["requirements.length"]);
   });
 });
+
+describe("outgoing email doesn't select mailbox reading", () => {
+  it.each([
+    "Agent that sends me an email with a 5 minute read about my interests",
+    "Agent that emails me a weekly digest of my interests",
+    "Send an email to me every Friday with AI news",
+  ])("%s", (text) => {
+    const { draft } = proposeRules(text);
+    expect(draft.selectedTools).toContain("send-email");
+    expect(draft.selectedTools).not.toContain("read-email");
+  });
+  it.each(["Summarize my emails every morning", "Read my inbox and draft replies", "Triage incoming emails from customers"])("%s still reads mail", (text) => {
+    expect(proposeRules(text).draft.selectedTools).toContain("read-email");
+  });
+  it("never blocks creation over a Pi-only problem", () => {
+    const { draft } = proposeRules("Read my inbox and draft replies");
+    const spec = createAgentSpec({ ...draft, requirementsConfirmed: true, details: { ...draft.details, inputs: [{ label: "Emails to answer", type: "text", formats: [], required: true }] } }, "inbox");
+    expect(specProblems(spec)).toEqual([]);
+    expect(exportProblems(spec, "Pi").map((p) => p.check)).toContain("tool");
+    expect(exportProblems(spec, "Claude Code")).toEqual([]);
+  });
+});

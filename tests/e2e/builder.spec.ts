@@ -561,7 +561,9 @@ test("removing a requirement the agent depends on is flagged, and a failed secon
   await page.goto("/");
   await page.getByLabel("Describe it, and Jev builds the first draft").fill("Read my PDF contracts and summarize the risks");
   await page.getByRole("button", { name: "Draft my agent" }).click();
+  await expect(page.getByText("Confirm “What Jev understood” above to create it.")).toBeVisible();
   await page.getByRole("button", { name: "Yes, that’s right" }).click();
+  await expect(page.getByText("Confirm “What Jev understood” above to create it.")).toHaveCount(0);
   await page.getByRole("button", { name: "Create my agent" }).click();
   const check = page.getByLabel("Completeness check");
   await expect(check).toContainText("Replies in the conversation: No step delivers the result.");

@@ -1259,7 +1259,8 @@ export function ReviewPage({ draft, dispatch, trigger }: PageProps) {
         <div className="follow-up">
           <ShieldCheck size={18} />
           <div>
-            <strong>The Pi package export will stop until you fix these</strong>
+            <strong>You can create this agent. Only the Pi download is affected</strong>
+            <p>Claude Code, Codex and the other targets still work. To also export it for Pi, fix these:</p>
             <ul className="question-list">
               {[...new Set(pi.map((p) => p.message))].map((message) => (
                 <li key={message}>{message}</li>
@@ -1269,9 +1270,11 @@ export function ReviewPage({ draft, dispatch, trigger }: PageProps) {
         </div>
       )}
       <p className="safety">
-        <ShieldCheck size={18} /> Always asks before sending messages, creating
-        events, or changing records. Exported instructions are not an OS
-        security sandbox.
+        <ShieldCheck size={18} />{" "}
+        {spec.tools.some((t) => t.id === "send-email" && !t.requiresApproval)
+          ? "Emails only your own address without asking; asks before anything else that sends, creates or changes."
+          : "Always asks before sending messages, creating events, or changing records."}{" "}
+        Exported instructions are not an OS security sandbox.
       </p>
       <details className="spec-details">
         <summary>
@@ -1279,7 +1282,15 @@ export function ReviewPage({ draft, dispatch, trigger }: PageProps) {
         </summary>
         <pre>{JSON.stringify(spec, null, 2)}</pre>
       </details>
-      <div className="page-actions right">
+      <div className="page-actions">
+        {/* Say why the button is off, right next to it. */}
+        <span className="hint" aria-live="polite">
+          {blocking.length > 0
+            ? "Fix the problems listed above to create it."
+            : draft.requirements.length > 0 && !draft.requirementsConfirmed
+              ? "Confirm “What Jev understood” above to create it."
+              : ""}
+        </span>
         <button
           className="button primary"
           disabled={blocking.length > 0 || (draft.requirements.length > 0 && !draft.requirementsConfirmed)}
