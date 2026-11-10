@@ -31,6 +31,7 @@ import {
 export { catalog, inputChips, outputChips, getTool, getSkillSource } from "./catalog";
 export * from "./describe";
 export * from "./requirements";
+export * from "./typesafe";
 import { extractRequirements, mergeRequirements, requiredTools } from "./requirements";
 const catalogId = z
   .string()
@@ -70,6 +71,9 @@ const defaults: Record<JevInput["category"], ToolId[]> = {
 };
 // Unicode token boundaries: “email” must not match “voicemail” or “emailing”.
 export const matchesKeyword = hasWord;
+/** A model can't add mailbox access on its own: the request must be about mail the user receives. */
+export const modelMayPick = (id: string, text: string, inputChips: string[] = []) =>
+  id !== "read-email" || inputChips.includes("emails") || readsMailbox(text);
 /** The request is about mail the user receives, not mail the agent sends. */
 export function readsMailbox(text: string) {
   return (
@@ -188,7 +192,8 @@ export async function advise(
     );
     const merged = new Map(rules.recommendations.map((r) => [r.id, r]));
     for (const pick of result.picks)
-      if (!merged.has(pick.id)) merged.set(pick.id, { ...pick, source: "llm" });
+      if (!merged.has(pick.id) && modelMayPick(pick.id, input.context, input.inputChips))
+        merged.set(pick.id, { ...pick, source: "llm" });
     const requirements = mergeRequirements(input.context, rules.requirements, result.requirements);
     for (const id of requiredTools(requirements))
       if (!merged.has(id))

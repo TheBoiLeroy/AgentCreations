@@ -9,7 +9,9 @@ export default defineConfig({
   use: { baseURL: "http://127.0.0.1:3100", trace: "retain-on-failure" },
   webServer: {
     command: "corepack pnpm --filter @agents/web exec next dev --hostname 127.0.0.1 --port 3100",
-    env: { NEXT_DIST_DIR: ".next-e2e", TURSO_DATABASE_URL: database, GITHUB_CLIENT_ID: "", GITHUB_CLIENT_SECRET: "" },
+    env: { NEXT_DIST_DIR: ".next-e2e", TURSO_DATABASE_URL: database, GITHUB_CLIENT_ID: "", GITHUB_CLIENT_SECRET: "",
+      // Empty values win over apps/web/.env.local: tests never call the real Jev or spend its key.
+      JEV_API_KEY: "", TYPESAFE_API_KEY: "" },
     url: "http://127.0.0.1:3100",
     reuseExistingServer: false,
     timeout: 120000,

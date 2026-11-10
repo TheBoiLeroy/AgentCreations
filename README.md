@@ -24,7 +24,7 @@ corepack pnpm build
 ## What works
 
 - Reducer-driven creation flow: animated category → name → needs → Jev reading → advised skills → follow-up details → review/create → install. Back keeps answers; refresh starts a fresh build at step one.
-- Describe-to-create on the first page: type or dictate one sentence and Jev drafts the category, name, skills and details, then opens review with every assumption listed and editable. Rules work without a key; `JEV_API_KEY` adds a validated model pass. Dictation appears only where the browser has a speech API, which may send audio to the browser vendor.
+- Describe-to-create on the first page: type or dictate one sentence and Jev drafts the category, name, skills and details, then opens review with every assumption listed and editable. Rules work without a key; a TypeSafe `JEV_API_KEY` adds Jev's model pass. Dictation appears only where the browser has a speech API, which may send audio to the browser vendor.
 - Original animated SVGs imported with SVGR, a shared-layout avatar, direction-aware slide/fade transitions, dark mode and reduced-motion support.
 - Automatically generated unique triggers, editable tool selections with reasons/confidence, and catalog-owned approval requirements.
 - Jev rules for chips and whole-word keywords, plus an optional server-only model pass with an eight-second fallback.
@@ -64,7 +64,14 @@ The server creates an anonymous account on the first build POST and keeps a rand
 
 `GET /api/agent-builds/:id` reloads a draft; `GET /api/agent-builds` lists the most recent 100 builds for that browser session. A local recovery snapshot is retained even with cloud sync. Opening or refreshing the page starts a new build at step one rather than automatically restoring a local or cloud draft. On conflict, the UI preserves the local answers and offers retry or an explicit cloud reload rather than overwriting. Clearing both cookies and local storage loses access to an anonymous account; download JSON backups. Cross-device identity requires a future account-linking flow.
 
-To enable Jev's optional model pass, set `JEV_API_KEY` (an Anthropic API key) and `JEV_MODEL` in the same server environment. Never prefix either with `NEXT_PUBLIC_`. `POST /api/jev` always runs rules, and only calls the model for at least 12 trimmed characters of free text. Catalog-only model picks are merged with rules, not substituted for chip picks. Invalid output, provider failure or an eight-second deadline falls back to rules. The browser also falls back if the route is unreachable. The model sees the category, chip IDs and free-text description, so keep secrets out of those fields.
+Jev's optional model pass uses [Jev by TypeSafe](https://docs.typesafe.ai), a model that answers typed questions with calibrated probabilities instead of writing text. Set `JEV_API_KEY` to a TypeSafe key (`apikey_…`, from https://console.typesafe.ai/keys) and optionally `JEV_MODEL` (lowercase, such as `jev-1.14.0`; default `jev-latest`) in `apps/web/.env.local`. Never prefix either with `NEXT_PUBLIC_`. Each call is one `POST https://api.typesafe.ai/v1/systemone` request:
+
+- **Skills:** one yes/no question per catalog skill; skills at 75% or more are suggested. Mailbox reading is only ever added when the request is about mail you receive.
+- **Requirements:** Choice questions for delivery, recipient and schedule, and a yes/no for web research, kept only above 60%. Requirements the rules quoted from your words always win; Jev's are marked as assumed for you to confirm.
+- **Describe box:** the category plus the skills and requirements above. Names, sections and method steps still come from rules, since Jev doesn't write prose.
+- **Completeness check:** one yes/no per confirmed requirement against the created agent's text.
+
+`POST /api/jev` always runs rules first, and only calls Jev for at least 12 trimmed characters of free text. Picks are catalog ids only and merged with rules, never substituted for chip picks. A TypeSafe error, malformed answers or an eight-second deadline falls back to rules. The browser also falls back if the route is unreachable. The model sees the category, chip IDs and free-text description, so keep secrets out of those fields.
 
 The optional Jev route has a per-process enhancement budget of 20 calls/minute and three concurrent model calls. Rules remain available when that budget is exhausted. For public multi-instance hosting, add authenticated user quotas and shared rate limiting before enabling a paid key. Recommendations describe capabilities; they do not connect accounts or change the Pi/MCP runtime's permissions.
 
@@ -74,7 +81,7 @@ The optional Jev route has a per-process enhancement budget of 20 calls/minute a
 2. **Confirmation.** The review page shows the list in plain sentences. Remove what is wrong, change the cadence, and confirm before the agent can be created.
 3. **Coverage.** Each requirement must land in the spec: a method step, a setting, a schedule, a tool or a boundary. An uncovered one blocks creation and export with a message that says how to fix it.
 4. **Output checks.** Every export is checked for duplicate sections, a malformed or pasted description, configured inputs called optional, email addresses, and uncovered requirements.
-5. **Second check.** After creation, one model call compares the agent with the confirmed list and shows any gap with a suggested fix. It needs `JEV_API_KEY` and `JEV_MODEL` in `apps/web/.env.local`; without them the page says the check did not run.
+5. **Second check.** After creation, Jev asks one yes/no question per confirmed requirement against the agent and shows any gap with a suggested fix. It needs `JEV_API_KEY` in `apps/web/.env.local`; without it the page says the check did not run.
 
 Email addresses are per-user settings (`EMAIL_TO` for Pi) and are never written into a spec or download. Mail to your own address sends without an approval prompt; every other external action still asks. A schedule is recorded and explained in the export, but nothing here runs agents on a timer: you add the command to your own scheduler. A recorded-actions test run of the generated agent is not built.
 

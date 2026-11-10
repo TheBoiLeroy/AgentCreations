@@ -22,6 +22,7 @@ import {
   skillQuestions,
   suggestDetails,
   usesSkillQuestions,
+  modelMayPick,
 } from "./index";
 import { mergeRequirements, requiredTools } from "./requirements";
 
@@ -185,7 +186,7 @@ function assemble(description: string, guess: Guess, mode: Proposal["mode"]): Pr
       : pick,
   );
   const requirements = mergeRequirements(text, rules.requirements, guess.requirements);
-  for (const id of [...(guess.tools || []), ...requiredTools(requirements)])
+  for (const id of [...(guess.tools || []).filter((id) => modelMayPick(id, text, guess.inputChips)), ...requiredTools(requirements)])
     if (!recommendations.some((pick) => pick.id === id))
       recommendations.push({
         id,

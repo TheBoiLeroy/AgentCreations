@@ -399,7 +399,7 @@ export interface SpecProblem {
 export const isAnalysisAgent = (s: Pick<AgentSpec, "category" | "tools">) =>
   s.category === "information-analysis" ||
   s.tools.some((tool) => tool.id === "analyze-data");
-const coverageHints: Record<Requirement["type"], string> = {
+export const coverageHints: Record<Requirement["type"], string> = {
   delivery: "Switch on “Send email” in the skills, or remove this requirement.",
   recipient: "Switch on “Send email” so the recipient becomes a setting.",
   length: "Only worker agents write to a length. Remove this requirement or the live-panel choice.",

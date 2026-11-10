@@ -27,7 +27,7 @@
 ## Jev and tools
 
 - Add tools in `packages/jev/src/catalog.ts`: stable id, human label, description, whole-word/phrase keywords, connection requirement and authoritative `requiresApproval`. Add chips/defaults where relevant and tests for false-positive partial words.
-- Rules always run. Explicit chip recommendations survive model merging. Optional model output is catalog-id-only, validated and bounded to eight seconds; errors/timeouts fall back to rules. Keep model keys and calls inside `POST /api/jev` (a `{ description }` body asks for a whole draft).
+- Rules always run. Explicit chip recommendations survive model merging. The optional model is Jev by TypeSafe (System One): typed Choice/Noul questions, not text generation. Question builders and answer mappers live in `packages/jev/src/typesafe.ts` and are pure; only `POST /api/jev` calls the API. Model output is catalog-id-only, validated and bounded to eight seconds; errors/timeouts fall back to rules. A model may never add `read-email` without mailbox wording (`modelMayPick`). A `{ description }` body asks for a whole draft, `{ verify }` for the completeness check.
 - Approval flags come from the catalog, never the LLM or recommendation reasons. One fixed exception in `createAgentSpec`: `send-email` needs no approval when the user confirmed the recipient is themself, and it can then only reach the per-user recipient setting. Selecting a tool describes a requirement; it does not provision an integration or grant runtime permissions.
 
 ## Existing adapters and safety

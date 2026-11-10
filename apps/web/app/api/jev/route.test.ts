@@ -9,7 +9,9 @@ const input = {
 };
 beforeEach(() => {
   vi.stubEnv("JEV_API_KEY", "");
+  vi.stubEnv("TYPESAFE_API_KEY", "");
   vi.stubEnv("JEV_MODEL", "");
+  vi.unstubAllGlobals();
 });
 describe("server-only Jev API", () => {
   it("returns rules without model credentials", async () => {
@@ -73,5 +75,34 @@ describe("server-only Jev API", () => {
         )
       ).status,
     ).toBe(403);
+  });
+});
+
+describe("Jev via TypeSafe", () => {
+  const typesafe = (answers: Record<string, unknown>, status = 200) =>
+    vi.fn(async (_url: string, _init: RequestInit) => Response.json(status === 200 ? { model: "jev-1.14.0", answers } : { detail: "x" }, { status }));
+  it("sends typed questions to TypeSafe with the key and a lowercase model", async () => {
+    vi.stubEnv("JEV_API_KEY", "apikey_test");
+    vi.stubEnv("JEV_MODEL", "Jev-1.14.0");
+    const fetcher = typesafe({ "tool:draft-text": { type: "noul", noul: 0.9 } });
+    vi.stubGlobal("fetch", fetcher);
+    const result = await (await POST(new Request("http://localhost/api/jev", { method: "POST", body: JSON.stringify(input) }))).json();
+    expect(result.mode).toBe("enhanced");
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe("https://api.typesafe.ai/v1/systemone");
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer apikey_test");
+    const body = JSON.parse(String(init.body));
+    expect(body.model).toBe("jev-1.14.0");
+    expect(body.questions["tool:draft-text"]).toMatchObject({ type: "noul" });
+    expect(body.state).toMatchObject({ request: input.context });
+  });
+  it("falls back to rules when TypeSafe errors or answers malformed data", async () => {
+    vi.stubEnv("JEV_API_KEY", "apikey_test");
+    for (const fetcher of [typesafe({}, 401), vi.fn(async () => Response.json({ nonsense: true }))]) {
+      vi.stubGlobal("fetch", fetcher);
+      const result = await (await POST(new Request("http://localhost/api/jev", { method: "POST", body: JSON.stringify(input) }))).json();
+      expect(result.mode).toBe("fallback");
+      expect(result.recommendations).toEqual(expect.arrayContaining([expect.objectContaining({ id: "draft-text" })]));
+    }
   });
 });
