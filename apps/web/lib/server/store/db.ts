@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { migrations } from "./migrations";
 
 export type Db = Client | Transaction;
+/** Storage is missing or unreachable: a configuration problem, not a bad request. */
+export class StorageUnavailable extends Error {}
 /** The repository root, found from the working directory (apps/web under Next, the root under tests). */
 function repoRoot() {
   let dir = process.cwd();
@@ -20,7 +22,7 @@ export function databaseUrl() {
   if (process.env.TURSO_DATABASE_URL) return process.env.TURSO_DATABASE_URL;
   // Serverless file systems are read-only or wiped between requests: a local file would lose data.
   if (process.env.VERCEL)
-    throw new Error("TURSO_DATABASE_URL is not set. Connect a Turso database to this Vercel project.");
+    throw new StorageUnavailable("TURSO_DATABASE_URL is not set. Connect a Turso database to this Vercel project.");
   return `file:${join(repoRoot(), ".data", "agent-creations.db")}`;
 }
 export async function migrate(db: Client) {
@@ -65,10 +67,13 @@ export async function openDatabase(url = databaseUrl(), authToken = process.env.
 // One client per server process. Kept on globalThis so dev reloads and separate route bundles share it.
 const shared = globalThis as unknown as { agentCreationsDb?: Promise<Client> };
 export function database(): Promise<Client> {
-  shared.agentCreationsDb ??= openDatabase().catch((error) => {
-    shared.agentCreationsDb = undefined;
-    throw error;
-  });
+  shared.agentCreationsDb ??= Promise.resolve()
+    .then(() => openDatabase())
+    .catch((error) => {
+      shared.agentCreationsDb = undefined;
+      console.error(error);
+      throw error instanceof StorageUnavailable ? error : new StorageUnavailable("The database can't be reached.");
+    });
   return shared.agentCreationsDb;
 }
 /** Tests swap in an in-memory database. */

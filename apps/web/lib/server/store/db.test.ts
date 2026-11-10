@@ -63,3 +63,21 @@ describe("database location", () => {
     }
   });
 });
+describe("missing storage", () => {
+  it("reports a storage problem instead of a generic failure", async () => {
+    const { database, useDatabase, StorageUnavailable } = await import("./db");
+    const saved = { url: process.env.TURSO_DATABASE_URL, vercel: process.env.VERCEL };
+    try {
+      useDatabase(undefined);
+      delete process.env.TURSO_DATABASE_URL;
+      process.env.VERCEL = "1";
+      await expect(database()).rejects.toBeInstanceOf(StorageUnavailable);
+    } finally {
+      useDatabase(undefined);
+      if (saved.url === undefined) delete process.env.TURSO_DATABASE_URL;
+      else process.env.TURSO_DATABASE_URL = saved.url;
+      if (saved.vercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = saved.vercel;
+    }
+  });
+});

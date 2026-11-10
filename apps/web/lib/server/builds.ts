@@ -3,7 +3,7 @@ import { z } from "zod";
 import { draftSchema, parseAgentSpec, triggerFromName } from "@agents/spec";
 import { createAgentSpec, validateDraftCatalog } from "@agents/jev";
 import { currentUser, ensureUser } from "./auth";
-import { database } from "./store/db";
+import { database, StorageUnavailable } from "./store/db";
 import { getBuild, listBuilds, saveBuild as store, StoreConflict } from "./store/builds";
 
 export class ApiError extends Error {
@@ -117,6 +117,11 @@ export function apiError(error: unknown) {
     return Response.json({ error: error.message }, { status: error.status });
   if (error instanceof StoreConflict)
     return Response.json({ error: error.message }, { status: 409 });
+  if (error instanceof StorageUnavailable)
+    return Response.json(
+      { error: "Saving, sign-in and setups are unavailable: this site's database isn't connected yet." },
+      { status: 503 },
+    );
   if (error instanceof z.ZodError)
     return Response.json(
       {
